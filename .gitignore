@@ -1,0 +1,16 @@
+# secrets — never commit real keys
+.env
+.env.local
+
+# node / build
+node_modules/
+dist/
+.astro/
+
+# agent runtime
+scripts/seo-agent/data/
+logs/
+
+# os
+.DS_Store
+Thumbs.db
