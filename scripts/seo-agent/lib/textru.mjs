@@ -15,6 +15,7 @@ async function postForm(params) {
     method: 'POST',
     headers: { ...DEFAULT_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
     body,
+    signal: AbortSignal.timeout(30_000),
   });
   const text = await res.text();
   try { return JSON.parse(text); } catch { throw new Error(`text.ru: не JSON: ${text.slice(0, 200)}`); }

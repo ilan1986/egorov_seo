@@ -2,10 +2,10 @@
 // Фронтматтер сохраняется ДОСЛОВНО, расширяется только тело. Запуск: node scripts/seo-agent/expand-existing.mjs
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT_DIR } from './config.mjs';
 import { ask } from './lib/aigate.mjs';
 import { sanitizeMdx } from './lib/generate-post.mjs';
-import { internalLinkPool } from './lib/content.mjs';
+import { internalLinkPool, contentDirs } from './lib/content.mjs';
+import { PROFILE } from '../../site.profile.mjs';
 
 const MIN = 1500;
 const TARGET = 1850;
@@ -29,7 +29,7 @@ const walk = (d) => {
 
 const pool = internalLinkPool();
 const links = pool.map((l) => `- ${l.title}: ${l.url}`).join('\n');
-const files = [join(ROOT_DIR, 'src/content/blog'), join(ROOT_DIR, 'src/content/services')].flatMap(walk);
+const files = contentDirs().flatMap(walk);
 
 let expanded = 0, skipped = 0;
 for (const f of files) {
@@ -43,15 +43,15 @@ for (const f of files) {
   for (let pass = 0; pass < 3 && wc(newBody) < MIN + 80; pass++) {
     const prompt =
       `Это ТЕЛО страницы «${t}» (без фронтматтера). Расширь его до НЕ МЕНЕЕ ${TARGET} слов живым ` +
-      `экспертным языком от лица бухгалтера-аудитора: добавь разделы H2/H3, конкретные примеры с цифрами, ` +
-      `частые ошибки, разбор по ситуациям, ссылки на статьи НК РФ и хотя бы 1 внешнюю ссылку на nalog.gov.ru ` +
-      `или consultant.ru. СОХРАНИ имеющуюся разметку (factbox, таблицы, ссылки) и добавь минимум 3 внутренние ` +
+      `экспертным языком от лица ${PROFILE.generation.expertPersonaShort}: добавь разделы H2/H3, конкретные ` +
+      `примеры с цифрами, частые ошибки, разбор по ситуациям${PROFILE.generation.authoritySourcesHint ? `, ${PROFILE.generation.authoritySourcesHint}` : ''}. ` +
+      `СОХРАНИ имеющуюся разметку (factbox, таблицы, ссылки) и добавь минимум 3 внутренние ` +
       `ссылки из списка. БЕЗ клише и «воды». Разметка — Markdown; единственный HTML — врезка <aside class="factbox">…</aside>; ` +
       `НЕ добавляй import/export и JSX-компоненты; знаки сравнения пиши словами (менее/более). ` +
       `Верни ТОЛЬКО тело в MDX (без фронтматтера, без тройных кавычек).\n\n` +
       `Внутренние ссылки:\n${links}\n\nТекущее тело:\n${newBody}`;
     try {
-      newBody = strip(await ask('Ты эксперт-редактор по налогам и бухгалтерии РФ.', prompt, { maxTokens: 9000, temperature: 0.6 }));
+      newBody = strip(await ask(PROFILE.generation.systemPrompt, prompt, { maxTokens: 9000, temperature: 0.6 }));
     } catch (e) { console.log(`  ! ошибка пасса: ${e.message}`); break; }
   }
 

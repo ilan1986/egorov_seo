@@ -1,24 +1,37 @@
 // Генерация статьи блога (Sonnet 4.6) + очеловечивание + детерминированный фактчек.
 import { ask, chat } from './aigate.mjs';
-import { checkUniqueness } from './textru.mjs';
+import { checkUniqueness } from './uniqueness.mjs';
 import { slugify } from './content.mjs';
-import { EXPERT } from '../../../src/consts.ts';
+import { CONFIG } from '../config.mjs';
+import { PROFILE } from '../../../site.profile.mjs';
+
+// Все свои urlBase (MDX-коллекции + JSON-справочники) — чем считать ссылку "внутренней".
+// Раньше здесь было хардкодом /uslugi/|/blog/ (утечка из nalog-expert) — на сайтах с другими
+// urlBase (напр. novostroyki: /stati/, /novostroyki/, /zastroyshchiki/, /raiony/) фактчек всегда
+// находил 0 внутренних ссылок, даже если LLM честно их вставлял по промпту.
+const INTERNAL_URL_BASES = [
+  ...PROFILE.content.collections.map((c) => c.urlBase),
+  ...(PROFILE.content.linkCatalogs || []).map((c) => c.urlBase),
+];
 
 const FORBIDDEN = [
   'в современном мире', 'в эпоху цифровизации', 'не секрет, что', 'важно отметить, что',
   'в заключение', 'подводя итог', 'давайте разберёмся', 'lorem', 'todo', 'placeholder',
 ];
 
-const SYSTEM = `Ты — опытный налоговый консультант и редактор, пишешь экспертные статьи для сайта бухгалтера
-${EXPERT.name} (аттестованный аудитор, ${EXPERT.experienceYears}+ лет). Пишешь живым человеческим русским
-языком, без канцелярита, клише и «воды». Конкретно, по делу, с пользой для предпринимателя. Где уместно —
-ссылаешься на статьи НК РФ. Точные числовые лимиты/ставки 2026 года, в которых не уверен, помечаешь как
-«уточняется по актуальной редакции НК РФ» — не выдумываешь цифры.`;
+// Голос/экспертиза/бренд — целиком из профиля сайта (site.profile.mjs), core не решает, кто перед ним.
+const SYSTEM = PROFILE.generation.systemPrompt;
 
-/** Сгенерировать MDX-статью под ключ. internalLinks: [{title,url}]. */
-export async function generatePost({ keyword, category = 'Налоги', internalLinks = [], pubDateISO }) {
+/** Сгенерировать MDX-статью под ключ. internalLinks: [{title,url}]. lsi/paa — данные Arsenkin (опц.). */
+export async function generatePost({ keyword, category = PROFILE.generation.defaultCategory, internalLinks = [], pubDateISO, lsi = [], paa = [] }) {
   const links = internalLinks.slice(0, 8).map((l) => `- ${l.title}: ${l.url}`).join('\n');
-  const prompt = `Напиши экспертную SEO-статью под поисковый запрос: «${keyword}».
+  const lsiBlock = lsi.length
+    ? `\n\nТЕМАТИЧЕСКИЕ ТЕРМИНЫ (Яндекс выделяет их в топ-10 — органично впиши по смыслу, без переспама): ${lsi.slice(0, 25).join(', ')}.`
+    : '';
+  const paaBlock = paa.length
+    ? `\n\nРЕАЛЬНЫЕ ВОПРОСЫ ПОЛЬЗОВАТЕЛЕЙ (используй их в поле faq, ответы дай экспертно своими словами): ${paa.slice(0, 6).map((q) => q).join(' | ')}`
+    : '';
+  const prompt = `Напиши экспертную SEO-статью под поисковый запрос: «${keyword}».${lsiBlock}${paaBlock}
 
 Требования к структуре — верни СТРОГО валидный MDX: сначала YAML-фронтматтер между --- , потом тело.
 
@@ -27,23 +40,19 @@ title: цепляющий заголовок до 60 символов (H1)
 seoTitle: title для <title> до 60 символов
 description: мета-описание 140–160 символов, с выгодой
 pubDate: ${pubDateISO}
-author: olga-rudova
 category: ${category}
-tldr: список из 4–6 кратких фактов для цитирования (с числами и ссылками на статьи НК РФ где уместно)
+tldr: список из 4–6 кратких фактов для цитирования (с числами и ссылками на первоисточники где уместно)
 faq: список из 5 вопросов-ответов (поля q и a)
 keywords: 4–6 ключевых фраз
-relatedServices: выбери 2–3 РЕЛЕВАНТНЫХ из списка услуг ниже (только slug из URL вида /uslugi/SLUG/)
-draft: false
+draft: false${PROFILE.generation.extraFrontmatter ? `\n${PROFILE.generation.extraFrontmatter}` : ''}
 
 Тело статьи (после фронтматтера):
 - объём НЕ МЕНЕЕ 1800 слов, 7–9 разделов H2 с подразделами H3
 - структура H2/H3, абзацы живые, разной длины
 - минимум один блок <aside class="factbox"> с подзаголовком ### и списком ключевых фактов
 - минимум одна таблица в Markdown
-- НЕ МЕНЕЕ 3 внутренних ссылок на услуги/статьи из списка ниже (markdown-ссылки [текст](URL))
-- ссылки на статьи НК РФ где это по делу
-- хотя бы 1 внешняя ссылка на первоисточник (nalog.gov.ru или consultant.ru) на упомянутую норму — для доверия и AI-цитирования
-- 1–2 живых вставки от первого лица («на практике у продавцов с оборотом… мы чаще видим…») — против ощущения AI-текста
+- НЕ МЕНЕЕ 3 внутренних ссылок на услуги/статьи из списка ниже (markdown-ссылки [текст](URL))${PROFILE.generation.authoritySourcesHint ? `\n- ${PROFILE.generation.authoritySourcesHint}` : ''}
+- 1–2 живых вставки от первого лица («на практике у клиентов с похожим запросом… мы чаще видим…») — против ощущения AI-текста
 - без клише, без «воды», без вступлений ни о чём
 - Разметка — обычный Markdown. Единственный разрешённый HTML — врезка <aside class="factbox">…</aside> (с подзаголовком ### внутри). НЕ добавляй import/export и НЕ используй JSX-компоненты. Знаки сравнения пиши словами: «менее», «не более», «до», «свыше», «более».
 
@@ -65,13 +74,15 @@ ${links}
   ).catch(() => mdx);
   mdx = cleaned.replace(/^```(mdx|markdown)?\n?/i, '').replace(/\n?```$/i, '').trim();
 
-  // Гарантия объёма: ПРАВИЛО — не меньше 1500 слов. Добиваем циклом, пока не хватит.
+  // Гарантия объёма: публикуем от 1300 слов (см. factcheckPost) — добиваем только до 1500,
+  // не до 1900+, и не более 2 попыток, чтобы не жечь баланс aigate.shop на бесконечных дожимах
+  // пограничных статей (было: цель 1600/до 3 попыток — расточительно для статей уже близких к порогу).
   let guard = 0;
-  while (wordCount(bodyOf(mdx)) < 1600 && guard < 3) {
+  while (wordCount(bodyOf(mdx)) < 1500 && guard < 2) {
     guard++;
     const expanded = await ask(
-      'Дополни статью до 1900+ слов: добавь конкретики, примеры, разбор частых ошибок и ещё один-два ' +
-        'раздела H2. НЕ СОКРАЩАЙ имеющееся. СОХРАНИ фронтматтер и всю разметку (таблицы, factbox, ссылки). ' +
+      'Дополни статью до 1500+ слов: добавь конкретики, примеры, разбор частых ошибок и, если нужно, ещё ' +
+        'один раздел H2. НЕ СОКРАЩАЙ имеющееся. СОХРАНИ фронтматтер и всю разметку (таблицы, factbox, ссылки). ' +
         'Без import и JSX-компонентов, сравнения пиши словами. Верни весь MDX целиком.',
       mdx,
       { maxTokens: 9000, temperature: 0.6 }
@@ -125,7 +136,10 @@ export async function factcheckPost(mdx, { minUnique = 82, checkUnique = true } 
   const issues = [];
   const body = bodyOf(mdx);
   const words = body.replace(/[#>*`\-|\[\]()]/g, ' ').split(/\s+/).filter(Boolean).length;
-  if (words < 1500) issues.push(`мало слов: ${words} (<1500)`);
+  // Порог снижен с 1500 до 1300 (06.07.2026): жёсткий 1500 гонял генерацию по кругу на пограничных
+  // статьях (1300-1499 слов бесполезно перегенерировались заново вместо публикации) — лишний расход
+  // aigate.shop без реальной пользы для читателя.
+  if (words < 1300) issues.push(`мало слов: ${words} (<1300)`);
 
   const title = fmField(mdx, 'title');
   const desc = fmField(mdx, 'description');
@@ -134,7 +148,8 @@ export async function factcheckPost(mdx, { minUnique = 82, checkUnique = true } 
   if (!desc) issues.push('нет description');
   else if (desc.length > 165) issues.push(`description > 165 (${desc.length})`);
 
-  const internal = (body.match(/\]\((\/uslugi\/|\/blog\/)[^)]*\)/g) || []).length;
+  const basesPattern = INTERNAL_URL_BASES.map((b) => b.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const internal = basesPattern ? (body.match(new RegExp(`\\]\\((${basesPattern})[^)]*\\)`, 'g')) || []).length : 0;
   if (internal < 3) issues.push(`мало внутренних ссылок: ${internal} (<3)`);
 
   if (!/class="factbox"/.test(body)) issues.push('нет блока factbox');
@@ -160,12 +175,13 @@ export async function factcheckPost(mdx, { minUnique = 82, checkUnique = true } 
   if (issues.length === 0) {
     try {
       const v = await ask(
-        'Оцени фактическую корректность статьи по налогам РФ от 0 до 1. Верни ТОЛЬКО число.',
+        PROFILE.generation.factcheckPrompt,
         body.slice(0, 8000),
         { maxTokens: 10, temperature: 0 }
       );
       confidence = parseFloat(v.replace(',', '.').match(/[0-9.]+/)?.[0] || '0');
-      if (confidence < 0.85) issues.push(`LLM confidence ${confidence} (<0.85)`);
+      const minConf = CONFIG.agent.minConfidence;
+      if (confidence < minConf) issues.push(`LLM confidence ${confidence} (<${minConf})`);
     } catch {}
   }
 

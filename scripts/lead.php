@@ -2,6 +2,9 @@
 // Приём заявок с формы сайта и пересылка в Telegram. Лежит на Reg.ru (тот же домен, https).
 header('Content-Type: application/json; charset=utf-8');
 
+// ЗАПОЛНИТЬ перед деплоем на конкретный сайт: либо через переменные окружения хостинга
+// (SetEnv в .htaccess / панель хостинга), либо — если хостинг не даёт env — заменить
+// плейсхолдер буквально. НЕ коммитить сюда реальные значения.
 $TOKEN = getenv('TELEGRAM_BOT_TOKEN') ?: 'YOUR_TELEGRAM_BOT_TOKEN';
 $CHAT  = getenv('TELEGRAM_CHAT_ID') ?: 'YOUR_TELEGRAM_CHAT_ID';
 

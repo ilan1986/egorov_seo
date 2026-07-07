@@ -4,7 +4,9 @@ import http from 'node:http';
 import { CONFIG } from '../seo-agent/config.mjs';
 import { chat } from '../seo-agent/lib/aigate.mjs';
 import { getUpdates, sendMessage, sendChatAction, getMe, escapeHtml } from './telegram.mjs';
+import { maxSendToAllChats, maxReady } from './max.mjs';
 import { SYSTEM_PROMPT } from './project-context.mjs';
+import { PROFILE } from '../../site.profile.mjs';
 
 const DIALOG_MODEL = CONFIG.aigate.dialogModel;
 const HISTORY_LIMIT = 16; // последних реплик в контексте
@@ -18,8 +20,8 @@ function pushHistory(chatId, role, content) {
 }
 
 const HELP = [
-  'Я ассистент проекта <b>Рудова Налоги</b>.',
-  'Спрашивай что угодно по сайту, услугам, продвижению и налогам — отвечаю через DeepSeek 4.',
+  `Я ассистент проекта <b>${escapeHtml(PROFILE.bot.projectName)}</b>.`,
+  'Спрашивай что угодно по сайту и продвижению — отвечаю через DeepSeek 4.',
   '',
   'Команды:',
   '/reset — очистить историю диалога',
@@ -30,6 +32,12 @@ async function handleMessage(msg) {
   const chatId = msg.chat.id;
   const text = (msg.text || '').trim();
   if (!text) return;
+
+  // Только владелец проекта — иначе любой нашедший бота бесплатно гоняет платный LLM и историю диалога.
+  if (String(chatId) !== String(CONFIG.telegram.chatId)) {
+    console.warn(`[bot] отклонён чужой chatId=${chatId}`);
+    return;
+  }
 
   if (text === '/start') {
     history.delete(chatId);
@@ -47,7 +55,7 @@ async function handleMessage(msg) {
   try {
     const reply = await chat(
       [{ role: 'system', content: SYSTEM_PROMPT }, ...(history.get(chatId) ?? [])],
-      { modelOverride: DIALOG_MODEL, temperature: 0.6, maxTokens: 1200 }
+      { modelOverride: DIALOG_MODEL, temperature: 0.6, maxTokens: 1200, costCategory: 'dialog' }
     );
     pushHistory(chatId, 'assistant', reply);
     await sendMessage(escapeHtml(reply), { chatId, parseMode: 'HTML' });
@@ -102,7 +110,7 @@ function startLeadServer() {
           const d = JSON.parse(body || '{}');
           if (d.company) return res.writeHead(200).end('{"ok":true}'); // honeypot
           const lines = [
-            '🟢 <b>Новая заявка с сайта</b>',
+            `🟢 <b>Новая заявка — ${escapeHtml(PROFILE.bot.projectName)}</b>`,
             d.name && `👤 ${escapeHtml(d.name)}`,
             d.contact && `📞 ${escapeHtml(d.contact)}`,
             d.message && `💬 ${escapeHtml(d.message)}`,
@@ -110,6 +118,16 @@ function startLeadServer() {
             d.page && `🔗 Страница: ${escapeHtml(d.page)}`,
           ].filter(Boolean);
           await sendMessage(lines.join('\n'));
+          if (maxReady()) {
+            const plain = [
+              `Новая заявка — ${PROFILE.bot.projectName}`,
+              d.name && `${d.name}`,
+              d.contact && `тел/контакт: ${d.contact}`,
+              d.message && `${d.message}`,
+              d.page && `страница: ${d.page}`,
+            ].filter(Boolean).join('\n');
+            maxSendToAllChats(plain).catch(() => {});
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' }).end('{"ok":true}');
         } catch (e) {
           console.error('[lead] err', e.message);

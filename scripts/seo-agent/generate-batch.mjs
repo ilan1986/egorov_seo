@@ -10,6 +10,7 @@ import {
   existingPages, internalLinkPool, loadUsedQueries, queuePath, queueCount, queuedSlugs, blogPostExists,
 } from './lib/content.mjs';
 import { sendMessage } from '../bot/telegram.mjs';
+import { PROFILE } from '../../site.profile.mjs';
 
 const TARGET = Number(process.env.BATCH_COUNT || 150);
 const log = (...a) => console.log('[batch]', ...a);
@@ -21,21 +22,15 @@ const seen = new Set([...coveredTitles.map(norm), ...loadUsedQueries().map(norm)
 const pool = internalLinkPool();
 const genDate = new Date().toISOString().slice(0, 10); // дата ставится реальная при публикации
 
-const CLUSTERS =
-  'бухгалтерия и налоги маркетплейсов (Wildberries, Ozon, Яндекс Маркет, Мегамаркет, Авито); ' +
-  'УСН «доходы» и «доходы минус расходы»; ПСН/патент; АУСН; ОСНО и НДС; ЕСХН; налоговая оптимизация; ' +
-  'требования и проверки ФНС (камеральные, выездные); дробление бизнеса; самозанятые и НПД; ' +
-  'страховые взносы ИП; расчёт зарплаты и кадры; регистрация и ликвидация ИП/ООО; смена налогового режима; ' +
-  'восстановление учёта в 1С; вычеты и льготы; блокировка счёта по 115-ФЗ; ЕНС и ЕНП; онлайн-кассы и ОФД; ' +
-  'учёт для услуг, торговли, общепита, IT, грузоперевозок, аренды';
+const CLUSTERS = PROFILE.generation.topicClusters;
 
 let topics = [];
 async function moreTopics(n) {
   const out = await ask(
-    'Ты SEO-стратег по налогам и бухгалтерии РФ. Отвечай только списком тем.',
-    `Дай ${n} НОВЫХ информационных тем-заголовков для статей блога бухгалтера-эксперта (актуально на 2026), ` +
-      `long-tail, с реальным поисковым спросом, по кластерам: ${CLUSTERS}. ` +
-      `Каждая тема — конкретный вопрос или проблема предпринимателя, не общие фразы. ` +
+    'Ты SEO-стратег. Отвечай только списком тем.',
+    `Дай ${n} НОВЫХ информационных тем-заголовков для статей блога от лица ${PROFILE.generation.expertPersonaShort} ` +
+      `(актуально на 2026), long-tail, с реальным поисковым спросом, по кластерам: ${CLUSTERS}. ` +
+      `Каждая тема — конкретный вопрос или проблема читателя, не общие фразы. ` +
       `НЕ повторяй уже имеющиеся темы. По одной теме на строку, без нумерации и кавычек.`,
     { maxTokens: 2500, temperature: 0.95 }
   );

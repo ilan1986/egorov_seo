@@ -2,8 +2,8 @@
 // Запуск: node scripts/seo-agent/cleanup-mdx.mjs
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ROOT_DIR } from './config.mjs';
 import { sanitizeMdx } from './lib/generate-post.mjs';
+import { contentDirs } from './lib/content.mjs';
 
 /** Починить «съеденный» моделью HTML: factbox-врезки и заголовки-якоря. */
 function repairHtml(mdx) {
@@ -27,8 +27,8 @@ const walk = (d) => {
 };
 
 let fixed = 0, total = 0;
-for (const dir of ['src/content/blog', 'src/content/services']) {
-  for (const f of walk(join(ROOT_DIR, dir))) {
+for (const dir of contentDirs()) {
+  for (const f of walk(dir)) {
     total++;
     const raw = readFileSync(f, 'utf-8');
     const clean = sanitizeMdx(repairHtml(raw));

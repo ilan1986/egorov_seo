@@ -1,5 +1,6 @@
 // Клиент xmlstock: поисковая выдача и оценка конкуренции (Яндекс/Google XML).
 import { CONFIG, DEFAULT_HEADERS } from '../config.mjs';
+import { logCall } from './cost-ledger.mjs';
 
 const { user, key, lr } = CONFIG.xmlstock;
 
@@ -8,7 +9,7 @@ function assertKeys() {
 }
 
 async function fetchText(url) {
-  const res = await fetch(url, { headers: DEFAULT_HEADERS });
+  const res = await fetch(url, { headers: DEFAULT_HEADERS, signal: AbortSignal.timeout(30_000) });
   if (!res.ok) throw new Error(`xmlstock HTTP ${res.status}`);
   return res.text();
 }
@@ -35,6 +36,7 @@ function stripCdata(s) {
  */
 export async function yandexSerp(query, { groups = 10 } = {}) {
   assertKeys();
+  logCall('xmlstock'); // баланс через API не публикует; считаем запросы
   const groupby = `attr%3D%22%22.mode%3Dflat.groups-on-page%3D${groups}.docs-in-group%3D1`;
   const url =
     `https://xmlstock.com/yandex/xml/?user=${user}&key=${key}` +

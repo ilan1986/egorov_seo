@@ -14,7 +14,7 @@ function assertKey() {
 }
 
 async function kie(path, init) {
-  const res = await fetch(`${baseUrl}${path}`, init);
+  const res = await fetch(`${baseUrl}${path}`, { ...init, signal: AbortSignal.timeout(60_000) });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(`kie HTTP ${res.status}: ${data?.msg || data?.message || ''}`);
   if (data && typeof data.code === 'number' && data.code !== 200) {
@@ -74,7 +74,7 @@ export async function generateNB2(prompt, { ratio = '16:9', resolution = '2K' } 
 
 /** Скачать и оптимизировать через sharp в public/images/<name>.<ext> */
 export async function optimizeTo(url, { name, width, height, format = 'jpg', quality = 80 }) {
-  const res = await fetch(url);
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
   if (!res.ok) throw new Error(`скачивание HTTP ${res.status}`);
   const raw = Buffer.from(await res.arrayBuffer());
 

@@ -13,6 +13,7 @@ export async function indexNowPing(urls) {
         method: 'POST',
         headers: { ...DEFAULT_HEADERS, 'Content-Type': 'application/json' },
         body: JSON.stringify({ host, key, keyLocation: `${CONFIG.siteUrl}/${key}.txt`, urlList: urls }),
+        signal: AbortSignal.timeout(30_000),
       });
       results.indexnow = res.ok;
     } catch {}

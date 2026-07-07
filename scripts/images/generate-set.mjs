@@ -1,10 +1,10 @@
-// Генерация стартового набора изображений сайта через NB2.
+// Генерация стартового набора изображений сайта: Pollinations.ai (основной) → kie.ai (резерв).
 // Запуск: node scripts/images/generate-set.mjs   (пропускает уже существующие)
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 import { ROOT_DIR } from '../seo-agent/config.mjs';
-import { credits, makeImage } from './kie-nb2.mjs';
+import { credits, makeImage } from './images.mjs';
 
 const STYLE =
   'premium minimalist editorial photography, warm paper tones with deep emerald green accents, ' +
