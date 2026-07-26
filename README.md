@@ -1,106 +1,81 @@
-# egorov_seo — autonomous SEO/GEO content agent (Claude skill)
+# egorov_seo — автономный SEO/GEO-агент (Claude Code skill)
 
-A reusable **Claude Code / Claude Agent skill** that deploys and runs a self‑driving SEO/GEO
-content engine for Russian‑language sites. It collects semantics (including real Yandex market
-**demand**, not just current impressions), generates expert articles, humanizes them, checks
-uniqueness, generates cover images, publishes to the site, pings Yandex for re‑crawl, tracks
-spend across every paid API, and sends a daily report to Telegram — with zero human involvement.
+Скилл для Claude Code: **автономный SEO/GEO-специалист**, который сам ведёт сайты — изучает
+нишу, работает с реальной семантикой, создаёт и оптимизирует контент, публикует, следит за
+индексацией и цитируемостью нейросетями, а рискованные действия согласует с человеком через
+Telegram. Работает в двух режимах: **свои сайты** и **клиентские сайты (агентство)**.
 
-Distilled from a real production build (originally the accounting‑expert site
-**buhgalter‑nalogi.ru**), now site‑agnostic.
+> Всё через конфиг — методика ядра одна, а каждый сайт описывается своим `site.profile.mjs`.
+> Ключи и доступы — только в `.env` (в репозитории их нет; см. `.env.example`).
 
-## What it does (9‑step workflow)
+## Что умеет
 
-1. **Collect** — existing pages, Yandex Webmaster (real queries/positions + **DEMAND**, market
-   search demand independent of the site's current visibility), Yandex Metrika, xmlstock SERP,
-   Arsenkin (LSI/Wordstat/PAA, optional).
-2. **Expand keywords** — Sonnet generates long‑tail queries per niche cluster, deduped.
-3. **Gap analysis** — uncovered keywords scored by ease‑of‑entry + Wordstat frequency + a bonus
-   for high‑demand/zero‑click queries → top‑N candidates.
-4. **Generate + verify** — Sonnet 4.6 → humanize → word‑count top‑up (max 2 rounds) → deterministic
-   fact‑check (**1300+ words** — a flexible floor, not a hard 1500, to avoid burning API spend
-   re‑generating borderline articles; title/desc length, internal links, factbox, table, no
-   clichés) + **uniqueness ≥82%** (content‑watch.ru primary → text.ru fallback) + LLM confidence
-   threshold.
-5. **Images** — Pollinations.ai (free, no key) as the primary provider, kie.ai Nano Banana 2 as a
-   silent fallback on failure.
-6. **Publish** (live only) — write MDX → `astro build` → FTP deploy → Yandex re‑crawl + IndexNow →
-   refresh `llms.txt`.
-7. **Cost ledger** — every paid aigate call logs its real `usage.cost_usd` (not a token estimate);
-   Arsenkin/xmlstock calls are counted (no balance API to diff against).
-8. **Monitor + Telegram report** (created/skipped/errors/in top‑30/queue left), optional duplicate
-   lead notification via MAX.
-9. **Daily summary report** (separate cron, e.g. 09:00 UTC) — today's traffic, traffic sources
-   (direct/search/link/messenger), indexed‑page count with delta, top10/50/100 positions with
-   trend arrows vs. the previous report, recommendations, and spend in $ per service.
+**Автономный агент (ReAct-цикл `perceive → decide → act`)**
+- Восприятие: живые метрики (Яндекс.Метрика — трафик/заявки, Вебмастер — спрос), позиции, бюджет.
+- Решение через **AI SDK tool-calling** — модель обязана выбрать инструмент из реестра (без парс-сбоев
+  и галлюцинаций несуществующих тулзов), с учётом журнала и дневного бюджета.
+- Действия: генерация статьи, переписывание title/description под CTR, дозапись тонких страниц,
+  освежение под свежесть/E-E-A-T, замер AI-цитируемости, проверка дрейфа/здоровья.
+- Класс риска: `auto` (делает сам) / `approve` (предлагает человеку → `/approve` в Telegram).
+- Зонд возможностей сервера + первый запуск (`onboard.mjs`): понимает, зачем его используют, и
+  разворачивает нужный тулсет.
 
-Plus: **mass batch generation** into a queue and **publish N/day** by cron; bulk **expand** of thin
-pages; a **Telegram bot** (project Q&A via DeepSeek + lead forwarding, chat‑id gated); weekly
-**positions report**.
+**Контент и семантика**
+- Реальная частотность и SERP (Wordstat/Arsenkin/XML) — без выдуманных ключей.
+- Генерация с фактчеком, проверкой уникальности и **quality-gate** (promptfoo): блокирует воду/клише
+  и тонкий контент до публикации.
+- Кластеризация, content-brief, перелинковка, авторские/Article/FAQ/Person schema.
 
-## Architecture: `site.profile.mjs`
+**GEO (оптимизация под ответы нейросетей)**
+- Citability-скоринг, `llms.txt`, GEO-директивы, E-E-A-T, свежесть.
+- **AI Share of Voice** — измеряет реальную цитируемость через web-grounded модель (Perplexity Sonar):
+  видит, какие домены выигрывают AI-ответ, и попал ли туда сайт.
 
-The engine itself is site‑agnostic — nothing in `scripts/` imports a specific site's content model.
-Everything specific (site type, content collections, brand voice, CTA copy) lives in ONE file,
-`site.profile.mjs`, in your project root, built from `site.profile.example.mjs`. This is what makes
-the same engine run unmodified on an expert‑persona site, an organization site, or a catalog site.
+**Аудит и агентские инструменты**
+- Глубокий аудит клиентского сайта (Crawlee: обход всего сайта + JS-рендер), детект local/ecommerce.
+- PDF-отчёт и КП (единые SEO+GEO, с графиками ECharts, рендер через gotenberg).
+- CRM-воронка клиентов, авто-поиск кандидатов, черновики первого касания.
 
-## What's in here
+**Аналитика и рост**
+- Своя cookieless-аналитика (Umami) и A/B-тесты форм (GrowthBook) через first-party-прокси.
+- Crawl-аналитика логов (goaccess): кто краулит, ходят ли ИИ-боты, битые URL глазами ботов.
+- Индексация (IndexNow), мониторинг позиций, дейли-репорт в Telegram.
+
+## Структура
 
 ```
-SKILL.md                       # entrypoint — read first (full operating guide, in Russian)
-site.profile.example.mjs       # site adapter contract/template — copy to site.profile.mjs and fill in
+SKILL.md                     # инструкция скилла для Claude Code
+.env.example                 # список переменных окружения (значения — свои, локально)
 scripts/seo-agent/
-  run.mjs                      # daily run: queue-publish or live-generate
-  generate-batch.mjs           # mass-generate N articles into the queue
-  daily-report.mjs             # daily summary: traffic/sources/pages/positions/spend
-  expand-existing.mjs          # grow thin existing pages
-  cleanup-mdx.mjs              # sanitize MDX (strip import/JSX, fix factbox/anchors)
-  competitor-analysis.mjs      # find low-competition keywords
-  positions-report.mjs         # weekly position report to Telegram
-  test-apis.mjs                # integration smoke test
-  config.mjs                   # .env loader + readiness()
-  lib/                         # xmlstock, aigate, webmaster (+demand), metrika, content-watch/
-                                # text.ru, cost-ledger, ctr-optimize, conversion, indexnow, content,
-                                # generate-post
-scripts/bot/                   # Telegram bot (dialogue + lead endpoint, chat-id gated) + MAX
-scripts/images/                # Pollinations.ai (primary) + kie.ai Nano Banana 2 (fallback)
-scripts/deploy-ftp.py          # deploy dist/ to FTP hosting
-scripts/lead.php               # PHP lead forwarder (host on shared hosting, same-origin)
-ecosystem.config.cjs           # pm2 (bot 24/7 + agent cron)
-.env.example                   # all keys (bring your own)
+  agent.mjs                  # автономный ReAct-цикл
+  onboard.mjs                # первый запуск: режим + зонд возможностей + план
+  run.mjs                    # линейный конвейер генерации/оптимизации/публикации
+  ai-citation-probe.mjs      # AI Share of Voice (Perplexity Sonar)
+  lib/                        # capabilities, agent-tools, decide-aisdk, agent-journal,
+                              # citability, geo-score, drift, charts, logaudit, deepcrawl,
+                              # quality-gate, client-audit/report, proposal, prospect, ...
+  quality/                    # promptfoo quality-gate
+  templates/                  # site.profile.example, robots.geo, политика/cookie/consent,
+                              # blocks/ (Astro-секции), *-proxy.php (first-party)
 ```
 
-## Install as a Claude skill
+## Быстрый старт
 
-```bash
-git clone https://github.com/ilan1986/egorov_seo.git ~/.claude/skills/egorov_seo
-```
-Then invoke with `/egorov_seo` (or just describe: "поставь сайт на SEO‑автопилот").
+1. Скопируйте `.env.example` → `.env` и заполните своими ключами.
+2. Опишите сайт в `site.profile.mjs` (см. `templates/site.profile.example.mjs`).
+3. Первый запуск: `node scripts/seo-agent/onboard.mjs own` (или `client`).
+4. Наблюдательный прогон агента: `AGENT_DRY=1 node scripts/seo-agent/agent.mjs`.
+5. Боевой (по расписанию): `DRY_RUN=false node scripts/seo-agent/agent.mjs` в cron, дневной бюджет
+   задаётся в профиле (`autonomy.dailyBudgetUsd`).
 
-> Project‑scoped: clone into `.claude/skills/egorov_seo` inside a repo instead.
+## Безопасность
 
-## Use the engine in a project
+- Секреты (`.env`, ключи, пароли, FTP, токены) в репозиторий **не попадают** — см. `.gitignore`.
+- Рискованные/наружу-видимые действия агент выполняет только после подтверждения человека.
+- Мин. пороги качества и фактчек — до публикации.
 
-1. Copy `scripts/` + `site.profile.example.mjs` into your Astro project root, rename the latter to
-   `site.profile.mjs` and fill it in (site type, content collections, brand voice, CTA — see
-   SKILL.md for the full contract).
-2. `cp .env.example .env` and fill in your own keys.
-3. If your target content collection is `.mdx`, make sure `@astrojs/mdx` is registered in
-   `astro.config.mjs` — Astro silently treats an unregistered `.mdx` collection as empty at build
-   time, which looks like the agent is broken when it isn't.
-4. `node scripts/seo-agent/test-apis.mjs` to verify integrations.
-5. Deploy the bot + cron (+ optional daily‑report cron) on a VPS — see `ecosystem.config.cjs` and
-   SKILL.md.
+---
 
-## ⚠️ No secrets included
-
-Ships **no API keys, tokens, servers, or passwords**. Every integration key (xmlstock, aigate,
-content‑watch/text.ru, Arsenkin, Yandex Webmaster/Metrika, kie.ai, Telegram, MAX, FTP) is read from
-a local `.env` that **you** create from `.env.example`. `scripts/lead.php` reads its Telegram
-token/chat from the server environment (falling back to a placeholder you must replace). Bring your
-own keys; never commit a real `.env` or a filled‑in `lead.php`.
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+Стек: Node.js (ESM), Astro-сайты, aigate (OpenAI-совместимый шлюз), Yandex Webmaster/Metrika,
+Wordstat/Arsenkin/XML, Perplexity Sonar, Crawlee/Playwright, promptfoo, ECharts, gotenberg,
+Umami, GrowthBook, Telegram Bot API.

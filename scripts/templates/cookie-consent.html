@@ -1,0 +1,32 @@
+<!--
+  ШАБЛОН cookie-баннера + гейтинга Яндекс Метрики (152-ФЗ: аналитика грузится ТОЛЬКО после согласия).
+  Вставить в конец <body> в BaseLayout. Требует, чтобы блок Метрики был обёрнут в функцию window.__ymLoad
+  (см. ниже) вместо немедленного вызова ym(...). Замени CCC на цвет-акцент сайта, {METRIKA_ID} на счётчик,
+  {POLICY} на путь политики.
+
+  1) МЕТРИКА С ГЕЙТИНГОМ — этот <script> вместо обычного счётчика Метрики:
+-->
+<script is:inline set:html={`
+  window.__ymLoad=function(){if(window.__ymLoaded)return;window.__ymLoaded=true;
+  (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+  m[i].l=1*new Date();for(var j=0;j<e.scripts.length;j++){if(e.scripts[j].src===r){return;}}
+  k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+  (window,document,"script","https://mc.yandex.ru/metrika/tag.js","ym");
+  ym({METRIKA_ID},"init",{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});};
+  try{if(localStorage.getItem("cookie-consent")==="accepted")window.__ymLoad();}catch(e){}
+`} />
+
+<!-- 2) БАННЕР -->
+<div id="cookie-banner" style="display:none;position:fixed;left:16px;right:16px;bottom:16px;z-index:9999;max-width:560px;background:#fff;border:1px solid #e2e3dd;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.15);padding:18px 20px;font-size:14px;line-height:1.5;color:#3c4a50">
+  <p style="margin:0 0 12px">Мы используем cookie и Яндекс.Метрику для работы сайта и статистики. Продолжая, вы соглашаетесь с <a href="{POLICY}" style="color:CCC">политикой обработки персональных данных</a>.</p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <button type="button" onclick="cookieChoice('accepted')" style="font-weight:600;padding:9px 18px;border-radius:10px;cursor:pointer;border:0;background:CCC;color:#fff">Принять</button>
+    <button type="button" onclick="cookieChoice('declined')" style="font-weight:600;padding:9px 18px;border-radius:10px;cursor:pointer;border:1px solid #e2e3dd;background:#fff;color:#0d1417">Отклонить</button>
+  </div>
+</div>
+
+<!-- 3) ЛОГИКА БАННЕРА -->
+<script is:inline>{`
+  function cookieChoice(v){try{localStorage.setItem('cookie-consent',v)}catch(e){}var el=document.getElementById('cookie-banner');if(el)el.style.display='none';if(v==='accepted'&&window.__ymLoad)window.__ymLoad();}
+  (function(){var c;try{c=localStorage.getItem('cookie-consent')}catch(e){}if(!c){var el=document.getElementById('cookie-banner');if(el)el.style.display='block';}})();
+`}</script>

@@ -1,16 +1,25 @@
-# secrets — never commit real keys
+# секреты и окружение — НИКОГДА в репозиторий
 .env
 .env.local
+.env.*
+!.env.example
+*secret*
+*credentials*
+logs-registry.mjs
 
-# node / build
-node_modules/
-dist/
-.astro/
-
-# agent runtime
+# рантайм-данные, логи, бэкапы
 scripts/seo-agent/data/
 logs/
+*.log
+*.bak
+*.bak2
+*.geobak
 
-# os
+# зависимости и сборка
+node_modules/
+dist/
+.cache/
+
+# системное
 .DS_Store
 Thumbs.db

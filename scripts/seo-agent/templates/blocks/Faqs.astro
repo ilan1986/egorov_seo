@@ -1,0 +1,45 @@
+---
+// Faqs — аккордеон вопрос-ответ на нативном <details> (без JS). Донор: AstroWind (MIT).
+// Бонус GEO: можно отдать те же пары как FAQPage JSON-LD (см. lib/schema.mjs) для цитируемости.
+// props: title?, items:[{q,a}]
+interface Item { q: string; a: string }
+interface Props { title?: string; subtitle?: string; items: Item[] }
+const { title, subtitle, items } = Astro.props;
+---
+<section class="faqs">
+  <div class="faqs__wrap">
+    {(title || subtitle) && (
+      <header class="faqs__head">
+        {title && <h2 set:html={title} />}
+        {subtitle && <p>{subtitle}</p>}
+      </header>
+    )}
+    <div class="faqs__list">
+      {items.map((it) => (
+        <details class="faq">
+          <summary>{it.q}<span class="faq__mark" aria-hidden="true"></span></summary>
+          <div class="faq__a"><p set:html={it.a} /></div>
+        </details>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .faqs { padding: clamp(48px, 7vw, 88px) 20px; }
+  .faqs__wrap { max-width: 760px; margin: 0 auto; }
+  .faqs__head { text-align: center; margin: 0 0 clamp(24px, 4vw, 40px); }
+  .faqs__head h2 { font-size: clamp(26px, 3.5vw, 38px); line-height: 1.15; margin: 0 0 10px; letter-spacing: -0.02em; color: var(--navy, #16233a); }
+  .faqs__head p { font-size: 17px; color: var(--muted, #5a6577); margin: 0; }
+  .faqs__list { display: grid; gap: 10px; }
+  .faq { background: var(--surface, #fff); border: 1px solid var(--border, #eaeefb); border-radius: 14px; overflow: hidden; }
+  .faq summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 22px; font-weight: 600; font-size: 16.5px; color: var(--navy, #16233a); }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq__mark { position: relative; flex: 0 0 16px; height: 16px; }
+  .faq__mark::before, .faq__mark::after { content: ''; position: absolute; background: var(--accent, #3b5bdb); transition: transform .2s ease; }
+  .faq__mark::before { top: 7px; left: 0; width: 16px; height: 2px; }
+  .faq__mark::after { top: 0; left: 7px; width: 2px; height: 16px; }
+  .faq[open] .faq__mark::after { transform: scaleY(0); }
+  .faq__a { padding: 0 22px 20px; }
+  .faq__a p { margin: 0; font-size: 15.5px; line-height: 1.65; color: var(--muted, #5a6577); }
+</style>

@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '../../'); // корень Astro-проекта, куда установлен агент
+const ROOT = resolve(__dirname, '../../'); // корень проекта nalog-expert
 
 // Node 21+/24: нативная загрузка .env
 try {

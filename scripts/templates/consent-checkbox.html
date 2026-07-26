@@ -1,0 +1,9 @@
+<!--
+  ШАБЛОН чекбокса согласия на обработку ПДн (152-ФЗ). Вставить в форму заявки (LeadForm)
+  ПЕРЕД кнопкой submit. Чекбокс обязателен (required) — форма не отправится без согласия.
+  Заменить {POLICY} на путь политики (PROFILE.legal.policyPath).
+-->
+<label class="lead__consent" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin:0 0 12px">
+  <input type="checkbox" name="consent" required style="width:auto;margin:3px 0 0;flex:none" />
+  <span>Я согласен на обработку <a href="{POLICY}">персональных данных</a></span>
+</label>

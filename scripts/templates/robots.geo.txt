@@ -1,0 +1,48 @@
+# robots.txt — «максимальная видимость для нейросетей» (GEO).
+# Кладётся в public/robots.txt сайта. Разрешает Tier-1/2 AI-ботам обход и цитирование,
+# блокирует только агрессивный скрапер Bytespider. Замени SITE на реальный домен в Sitemap.
+
+# --- Обычные поисковики ---
+User-agent: Yandex
+Allow: /
+User-agent: Googlebot
+Allow: /
+
+# --- AI-краулеры (ответы/цитирование) — РАЗРЕШИТЬ ---
+User-agent: GPTBot
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: ChatGPT-User
+Allow: /
+User-agent: ClaudeBot
+Allow: /
+User-agent: Claude-Web
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: Perplexity-User
+Allow: /
+User-agent: Google-Extended
+Allow: /
+User-agent: Applebot-Extended
+Allow: /
+User-agent: YandexAdditional
+Allow: /
+User-agent: Bingbot
+Allow: /
+User-agent: CCBot
+Allow: /
+
+# --- Агрессивные скраперы — заблокировать ---
+User-agent: Bytespider
+Disallow: /
+
+# Content-Signal (IETF draft): разрешаем обучение, поиск и retrieval-цитирование
+# (заголовок дублируй на уровне сервера/.htaccess, если хостинг позволяет)
+# Content-Signal: ai-train=yes, search=yes, ai-retrieval=yes
+
+User-agent: *
+Allow: /
+
+Sitemap: https://SITE/sitemap-index.xml

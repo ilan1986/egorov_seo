@@ -1,0 +1,48 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+<BaseLayout
+  title="Поиск по сайту — новостройки, ЖК, районы, статьи"
+  description="Быстрый поиск по каталогу новостроек Ярославля: жилые комплексы, районы, застройщики и статьи."
+  path="/poisk/"
+>
+  <section class="section">
+    <div class="container" style="max-width:860px">
+      <h1>Поиск по сайту</h1>
+      <p class="muted">Новостройки, ЖК, районы, застройщики и статьи — введите запрос.</p>
+      <div id="search" class="pf-search"></div>
+      <noscript><p class="muted">Для поиска включите JavaScript.</p></noscript>
+    </div>
+  </section>
+
+  <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+  <script is:inline src="/pagefind/pagefind-ui.js"></script>
+  <script is:inline>
+    window.addEventListener('DOMContentLoaded', function () {
+      if (typeof PagefindUI === 'undefined') return;
+      new PagefindUI({
+        element: '#search',
+        showSubResults: true,
+        showImages: false,
+        pageSize: 8,
+        translations: {
+          placeholder: 'Найти ЖК, район, застройщика, статью…',
+          clear_search: 'Очистить',
+          load_more: 'Показать ещё',
+          search_label: 'Поиск по сайту',
+          filters_label: 'Фильтры',
+          zero_results: 'Ничего не найдено по запросу «[SEARCH_TERM]»',
+          many_results: 'Найдено [COUNT] результатов по «[SEARCH_TERM]»',
+          one_result: 'Найден [COUNT] результат по «[SEARCH_TERM]»',
+          alt_search: 'Ничего не найдено по «[SEARCH_TERM]». Показаны результаты по «[DIFFERENT_TERM]»',
+          search_suggestion: 'Ничего не найдено по «[SEARCH_TERM]». Попробуйте другой запрос:',
+          searching: 'Поиск по запросу «[SEARCH_TERM]»…',
+        },
+      });
+    });
+  </script>
+  <style>
+    .pf-search { margin-top: 18px; }
+    .pf-search { --pagefind-ui-primary: var(--navy, #12305b); --pagefind-ui-border-radius: 10px; }
+  </style>
+</BaseLayout>

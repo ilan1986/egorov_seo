@@ -1,0 +1,42 @@
+---
+// Steps — «как это работает»: нумерованный процесс с вертикальной линией. Донор: AstroWind (MIT).
+// Нумерация уместна — это реальная последовательность. props: title?, items:[{title,text}]
+interface Item { title: string; text: string }
+interface Props { title?: string; subtitle?: string; items: Item[] }
+const { title, subtitle, items } = Astro.props;
+---
+<section class="steps">
+  <div class="steps__wrap">
+    {(title || subtitle) && (
+      <header class="steps__head">
+        {title && <h2 set:html={title} />}
+        {subtitle && <p>{subtitle}</p>}
+      </header>
+    )}
+    <ol class="steps__list">
+      {items.map((it, i) => (
+        <li class="step">
+          <span class="step__num">{i + 1}</span>
+          <div class="step__body">
+            <h3>{it.title}</h3>
+            <p set:html={it.text} />
+          </div>
+        </li>
+      ))}
+    </ol>
+  </div>
+</section>
+
+<style>
+  .steps { padding: clamp(48px, 7vw, 88px) 20px; }
+  .steps__wrap { max-width: 760px; margin: 0 auto; }
+  .steps__head { margin: 0 0 clamp(24px, 4vw, 40px); }
+  .steps__head h2 { font-size: clamp(26px, 3.5vw, 38px); line-height: 1.15; margin: 0 0 10px; letter-spacing: -0.02em; color: var(--navy, #16233a); }
+  .steps__head p { font-size: 17px; color: var(--muted, #5a6577); margin: 0; }
+  .steps__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .step { display: grid; grid-template-columns: auto 1fr; gap: 20px; position: relative; padding-bottom: 26px; }
+  .step:not(:last-child)::before { content: ''; position: absolute; left: 21px; top: 44px; bottom: 0; width: 2px; background: var(--border, #e6ebf7); }
+  .step__num { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 17px; background: var(--navy, #16233a); color: #fff; z-index: 1; }
+  .step__body h3 { font-size: 18px; margin: 8px 0 6px; color: var(--navy, #16233a); }
+  .step__body p { font-size: 15px; line-height: 1.6; color: var(--muted, #5a6577); margin: 0; }
+</style>

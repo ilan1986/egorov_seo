@@ -1,0 +1,41 @@
+---
+// Features — сетка преимуществ/услуг (иконка-эмодзи + заголовок + текст). Донор: AstroWind (MIT).
+// props: title?, subtitle?, columns?=3, items:[{icon?,title,text}]
+interface Item { icon?: string; title: string; text: string }
+interface Props { title?: string; subtitle?: string; columns?: 2 | 3 | 4; items: Item[] }
+const { title, subtitle, columns = 3, items } = Astro.props;
+---
+<section class="features">
+  <div class="features__wrap">
+    {(title || subtitle) && (
+      <header class="features__head">
+        {title && <h2 set:html={title} />}
+        {subtitle && <p>{subtitle}</p>}
+      </header>
+    )}
+    <div class="features__grid" style={`--cols:${columns}`}>
+      {items.map((it) => (
+        <article class="feature">
+          {it.icon && <div class="feature__icon" aria-hidden="true">{it.icon}</div>}
+          <h3>{it.title}</h3>
+          <p set:html={it.text} />
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .features { padding: clamp(48px, 7vw, 88px) 20px; }
+  .features__wrap { max-width: 1120px; margin: 0 auto; }
+  .features__head { max-width: 60ch; margin: 0 auto clamp(28px, 4vw, 48px); text-align: center; }
+  .features__head h2 { font-size: clamp(26px, 3.5vw, 38px); line-height: 1.15; margin: 0 0 12px; letter-spacing: -0.02em; text-wrap: balance; color: var(--navy, #16233a); }
+  .features__head p { font-size: 17px; line-height: 1.6; color: var(--muted, #5a6577); margin: 0; }
+  .features__grid { display: grid; grid-template-columns: repeat(var(--cols, 3), 1fr); gap: 20px; }
+  .feature { background: var(--surface, #fff); border: 1px solid var(--border, #eaeefb); border-radius: 16px; padding: 26px 24px; }
+  .feature__icon { font-size: 30px; line-height: 1; margin-bottom: 14px; }
+  .feature h3 { font-size: 18px; margin: 0 0 8px; color: var(--navy, #16233a); }
+  .feature p { font-size: 15px; line-height: 1.6; color: var(--muted, #5a6577); margin: 0; }
+  @media (max-width: 900px) { .features__grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .features__grid { grid-template-columns: 1fr; } }
+</style>

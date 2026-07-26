@@ -1,0 +1,57 @@
+# Quality-gate ИИ-контента (promptfoo). Провайдер echo → на выход идёт сам текст,
+# ассерты его оценивают: объём, клише/вода, структура, llm-рубрика (грейдер — AiGate).
+# Порог слов и рубрика подставляются обёрткой lib/quality-gate.mjs через env/vars.
+description: Content quality gate
+
+providers:
+  - id: echo
+
+prompts:
+  - '{{content}}'
+
+defaultTest:
+  options:
+    provider:
+      id: openai:chat:google/gemini-3.1-flash-lite
+      config:
+        apiBaseUrl: https://api.aigate.shop/v1
+        apiKeyEnvar: AIGATE_API_KEY
+        temperature: 0
+  assert:
+    # 1) Объём (порог из env QG_MIN_WORDS)
+    - type: javascript
+      value: |
+        const min = Number(process.env.QG_MIN_WORDS || 800);
+        const words = (output.match(/[A-Za-zА-Яа-яЁё0-9]+/g) || []).length;
+        return words >= min
+          ? { pass: true, score: 1, reason: `Слов: ${words} (≥${min})` }
+          : { pass: false, score: 0, reason: `Мало слов: ${words} < ${min}` };
+    # 2) Клише / вода (AI-slop)
+    - type: not-icontains-any
+      value:
+        - 'в современном мире'
+        - 'в эпоху цифровизации'
+        - 'важно отметить'
+        - 'стоит отметить, что'
+        - 'подводя итог'
+        - 'в заключение стоит'
+        - 'не секрет, что'
+        - 'играет важную роль'
+    # 3) Структура: есть подзаголовки (markdown ## или html h2/h3)
+    - type: javascript
+      value: |
+        const hasHeads = /(^|\n)#{2,3}\s+\S/.test(output) || /<h[23][\s>]/i.test(output);
+        return hasHeads
+          ? { pass: true, score: 1, reason: 'Есть подзаголовки' }
+          : { pass: false, score: 0, reason: 'Нет подзаголовков (плоский текст)' };
+    # 4) LLM-рубрика (грейдер AiGate) — экспертность, факты, отсутствие воды
+    - type: llm-rubric
+      value: >
+        Оцени текст как эксперт-редактор. Хорошо (высокий балл): фактологичность и польза,
+        экспертный тон, логичная структура, конкретика и цифры, отсутствие воды и клише,
+        релевантность теме. Плохо (низкий балл): вода, штампы, обобщения без сути, оффтоп.
+      threshold: 0.7
+
+tests:
+  - vars:
+      content: file://content.txt

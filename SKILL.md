@@ -13,8 +13,16 @@ description: >-
   по cron. Используй, когда нужно: поставить сайт на SEO-автопилот, нагенерить пакет статей по
   семантическому ядру, расширить тонкие тексты, подключить Вебмастер/Метрику/content-watch/xmlstock/
   kie.ai, развернуть бота заявок+диалога и ежедневный отчёт, или склонировать эту систему под новый
-  сайт/нишу. Триггеры: «seo агент», «egorov_seo», «контент-автопилот», «нагенери статьи по семантике»,
-  «расширь тексты», «публикуй по 5 в день», «ежедневный отчёт».
+  сайт/нишу. GEO-модуль: скорер цитируемости (`lib/citability.mjs`), генератор JSON-LD @graph
+  Article/FAQPage/Person/speakable (`lib/schema.mjs`), llms.txt по спеке (`lib/llmstxt.mjs`), robots.txt
+  для AI-ботов, раздел `geo` в профиле, LLM-планировщик приоритетов (`lib/planner.mjs`) — превращает
+  линейный прогон в агента. Триггеры: «seo агент», «egorov_seo», «контент-автопилот», «нагенери статьи по
+  семантике», «расширь тексты», «публикуй по 5 в день», «ежедневный отчёт», «GEO», «оптимизация под
+  нейросети», «цитирование нейросетями», «schema», «llms.txt», «citability», «политика конфиденциальности»,
+  «152-ФЗ», «cookie-баннер», «согласие на обработку персональных данных». Юр-комплаенс РФ (152-ФЗ):
+  раздел `legal` в профиле + шаблоны `scripts/templates/` (страница политики текстом, cookie-баннер с
+  гейтингом Метрики до согласия, чекбокс согласия на формах, реквизиты оператора в подвал) —
+  разворачивается на каждом новом сайте.
 ---
 
 # egorov_seo — автономный SEO/GEO контент-агент
@@ -97,6 +105,88 @@ entry type found for *.mdx` и коллекция считается пусто�
   проверку уникальности только на них, ставит дату=сегодня, публикует. Экономит платные проверки.
 - **Живая генерация** (очередь пуста): генерит сам по gap-анализу.
 
+## GEO-модуль (оптимизация под цитирование нейросетями)
+
+Надстройка над SEO: делает контент таким, чтобы нейросети (Яндекс Нейро, ChatGPT, Perplexity, Gemini)
+брали его в ответ и указывали сайт как источник. Настраивается разделом `geo` в `site.profile.mjs`
+(бренд, автор с `sameAs`/`knowsAbout`, ключевые факты, целевые площадки, probe-вопросы) — код ядра
+остаётся сайт-агностичным. Для RU-сайтов главная AI-площадка — **Яндекс Нейро** (индекс Яндекса), поэтому
+топ-10 в Яндексе + schema + свежесть решают.
+
+| Компонент | Файл | Что делает |
+|---|---|---|
+| **Скорер цитируемости** | `lib/citability.mjs` | Детерминированно (без LLM) бьёт статью на секции по H2/H3 и оценивает 0-100 по 5 категориям: answer-first (прямой ответ первой фразой), self-containment (без ведущих местоимений, назван субъект), структура (абзац 90-170 слов + списки/таблицы), плотность фактов/цифр, definition-паттерн/вопросный заголовок. Возвращает `{score, sections, weakSections}`. Использовать как **гейт фактчека** (рядом со «слов≥1300 / уник≥82%»: ниже порога — 1 цикл переписывания слабых секций) и в daily-report. `citabilitySummary(md)` — строка для лога. |
+| **Генератор JSON-LD** | `lib/schema.mjs` | `buildArticleGraph({title,description,url,datePublished,dateModified,image,keyword,md})` → один `@graph`: Article/BlogPosting + Person(автор c sameAs/knowsAbout) + Organization + BreadcrumbList + **FAQPage** (авто-извлечение Q/A из тела через `extractFaq`) + `speakable`. Вставлять **server-side** в Astro-layout: `<script type="application/ld+json" set:html={JSON.stringify(buildArticleGraph(...))} />`, НЕ JS-инъекцией. |
+| **llms.txt / llms-full.txt** | `lib/llmstxt.mjs` | `buildLlmsTxt(pages, opts)` по спеке llmstxt.org: H1(бренд) + blockquote(описание) + секции Ключевые факты / Статьи / Контакты со ссылками и описаниями. Заменяет примитивный `updateLlmsTxt()`. Публикуется в `public/llms.txt` при деплое. |
+| **robots.txt для AI-ботов** | `scripts/templates/robots.geo.txt` | Готовый шаблон: разрешает GPTBot/OAI-SearchBot/ChatGPT-User/ClaudeBot/PerplexityBot/Google-Extended/YandexAdditional и т.д., блокирует Bytespider. Скопировать в `public/robots.txt`, заменить `SITE`. Если боты заблокированы — весь GEO бесполезен, это фундамент. |
+| **Апгрейд промпта генерации** | правка `lib/generate-post.mjs` | В systemPrompt добавить: TL;DR-бокс 40-60 слов сверху; answer-first (1-2 фразы прямого ответа под каждым H2); 60-70% H2 как вопросы (из Arsenkin PAA); «citation capsule» на секцию; сравнительная таблица с шапкой; жирные определения терминов; evidence-triple на каждую статистику (год в прозе + источник + дата доступа). |
+
+**Как встроить в фактчек** (`lib/generate-post.mjs`): после генерации `const cit = scoreCitability(mdx)`; если `cit.score < 60` — один проход переписывания `cit.weakSections` (тот же паттерн, что цикл добивания объёма, ≤2 попытки), иначе публиковать. Средний `cit.score` новых статей — в daily-report.
+
+## Автономный режим — реальный AI-сотрудник, а не workflow (`agent.mjs`)
+
+Это то, что превращает «просто автоматизацию» в автономного SEO/GEO-специалиста: он САМ смотрит на
+состояние сайта, решает что даст максимум к цели (рост трафика/заявок), делает это или предлагает человеку,
+журналирует и учится. Дефолт (линейный `run.mjs`) остаётся; автономный режим — отдельная точка входа
+`node scripts/seo-agent/agent.mjs` (ставится на cron параллельно/вместо публикационного прогона).
+
+**Цикл (ReAct, не фикс-workflow):**
+1. **Восприятие** (`perceive()` в agent.mjs): собирает состояние — позиции/спрос (`report-state.json`), AI SoV
+   (`ai-sov.json`), Brand Authority (`brand-authority.json`), расход и остаток дневного бюджета, очередь
+   предложений, идущие эксперименты. Сюда же подключаются живые `metrika.metrikaToday()` (трафик/заявки) и
+   `webmaster.demandGaps()` при интеграции.
+2. **Решение** (`decide()`): LLM (Sonnet) по состоянию + целям + каталогу инструментов + журналу выбирает
+   ОДНО следующее действие (JSON `{thought, action, args, why}`) или `stop`. Видит результат — решает дальше.
+3. **Действие** (`lib/agent-tools.mjs`, `invokeTool`): два класса риска —
+   - **auto** (обратимо, в бюджете) — делает САМ: `generate_article`, `expand_thin`, `rewrite_ctr`,
+     `refresh_stale`, `ai_probe`, `brand_scan`, `drift_check` (обёртки над существующими скриптами ядра).
+   - **approve** (необратимо/наружу/дорого) — `deploy_widget`, `redesign_block`, `new_section`, `outreach`,
+     `big_spend` — НЕ выполняет, а `proposeAction()` шлёт предложение в Telegram (`/approve <id>` / `/reject <id>`).
+4. **Журнал + обучение** (`lib/agent-journal.mjs`): каждое решение → `journal.jsonl`; гипотезы → `experiments.json`
+   (метрика до/после — сработало усиливаем, нет откатываем); предложения → `proposals.json`.
+
+**Гейты автономии (безопасность):** дневной бюджет `autonomy.dailyBudgetUsd` (по исчерпании — стоп),
+`maxCyclesPerRun`, класс риска auto/approve (рискованное всегда к человеку — `autoApprove:false` по умолчанию),
+все публикации через существующие проверки (уникальность/citability/eeat/ai-slop), полный decision-log.
+Человек управляет через бот: `/proposals` (что ждёт), `/approve <id>`, `/reject <id>` (добавлены в `bot.mjs`).
+
+**Цели** — раздел `goals` в `site.profile.mjs` (что для сайта значит «результат»: KPI трафик/топ-10/заявки/AI SoV).
+**Настройки** — раздел `autonomy` (бюджет, maxCycles, autoApprove).
+
+Файлы: `agent.mjs` (цикл), `lib/agent-tools.mjs` (каталог+риск+обёртки), `lib/agent-journal.mjs`
+(журнал/цели/эксперименты/предложения). Более лёгкий `lib/planner.mjs` (одноразовый приоритетный JSON-план)
+остаётся как быстрый вариант без полного цикла.
+
+**Честно про границы:** агент сам делает всю обратимую SEO/GEO-работу (контент, мета, перелинковка, схема,
+переиндексация, замеры) — это 80% роста. Необратимое и наружу-видимое (новый виджет, редизайн, аутрич от имени
+владельца) он ГОТОВИТ как конкретное предложение и ждёт одобрения — так работает реальный сотрудник, а не
+бесконтрольный бот. Автономный слой пока в снапшоте скилла (синтаксис зелёный, каталог/журнал протестированы);
+живой запуск на проде — вписать cron `agent.mjs` + подключить live-метрики в `perceive()`.
+
+### Измеримость GEO (реализовано) — метрики и гейты качества
+
+| Модуль | Файл | Что делает |
+|---|---|---|
+| **GEO-директивы генерации** | `lib/geo-prompt.mjs` | `GEO_DIRECTIVES` — блок в systemPrompt генерации (TL;DR, answer-first под H2, вопросные H2 из PAA, citation capsules, evidence-triple, таблицы, определения). `GEO_REWRITE_HINT` — для дожима слабых секций. Поднимает `citability.score` каждой статьи. Подмешать: `BASE_PROMPT + '\n\n' + GEO_DIRECTIVES`. |
+| **AI Share of Voice** | `ai-citation-probe.mjs` | Гоняет `geo.probeQuestions` в LLM (aigate), проверяет упоминание бренда/домена в ответе и в списке рекомендаций → **AI SoV %** + тренд (`data/ai-sov.json`). Единственная метрика, показывающая, работает ли GEO. `sovReportLine()` — в daily-report. CLI: `node scripts/seo-agent/ai-citation-probe.mjs`. |
+| **Brand Authority (RU)** | `brand-mentions.mjs` | Через xmlstock `<бренд> site:host` считает присутствие на YouTube/Wikipedia/VK/Дзен/Хабр/Пикабу/Telegram (RU-веса) → score 0-100 + слабые площадки. Упоминания коррелируют с AI-цитатами ~3x сильнее беклинков. Еженедельный cron → Telegram. |
+| **E-E-A-T гейт** | `lib/eeat.mjs` | Детерминированный скоринг статьи 0-100 (автор+sameAs+креды, даты, внешние источники, объём, признаки опыта, YMYL-дисклеймер). Гейт генерации рядом с citability. |
+| **Движок свежести 30д** | `lib/freshness.mjs` | `freshnessGaps(pages, {days:30})` — страницы старше N дней в очередь на рефреш (76% топ-AI-цитат ≤30 дн). `freshnessReportLine()` — % свежих в отчёт. Дополняет `health.mjs`. |
+| **Composite GEO-score** | `lib/geo-score.mjs` | `compositeGeoScore({citability, brandAuthority, eeat, technical, schema, aiSov})` → единый балл 0-100 + рейтинг (веса из geo-audit). `geoScoreLine()` с дельтой ▲/▼ — в daily-report. |
+
+**Как замкнуть цикл (интеграция в живой прогон — следующий шаг, не в снапшоте):** citability+eeat как гейты в
+`generate-post.mjs` (ниже порога — переписать слабые секции через `GEO_REWRITE_HINT`); `GEO_DIRECTIVES` в
+промпт генерации; `schema.buildArticleGraph()` в Astro-layout статьи, `buildWebSiteGraph()` на главную;
+`buildLlmsTxt()` + `robots.geo.txt` на деплой; cron `ai-citation-probe` + `brand-mentions`; блок GEO-score +
+AI SoV + свежесть в `daily-report.mjs`, и в `planner.mjs` snapshot добавить aiSov/freshness как сигналы.
+
+**Дорожная карта (осталось):** `cluster-plan.mjs` (hub-and-spoke по SERP-overlap, анти-каннибализация,
+авто-перелинковка) — частично закрыт существующими `demandGaps`/каннибализацией в `health.mjs`, вторая волна.
+Вне скоупа автономного агента (это инструменты GEO-агентства): `geo-report`/`geo-report-pdf` (клиентские
+отчёты), `geo-proposal` (КП), `geo-prospect` (CRM лидов), `geo-compare` (месячная дельта клиенту) — из них
+взята только формула composite-score (реализована в `geo-score.mjs`) и идея дельта-трекинга (уже есть через
+`report-state.json`).
+
 ## Массовая генерация (`scripts/seo-agent/generate-batch.mjs`)
 
 `BATCH_COUNT=150 node scripts/seo-agent/generate-batch.mjs` — генерит N статей по семантике в очередь
@@ -140,6 +230,28 @@ t.me/wa.me/vk.me/viber.com/max.ru и т.п., это не нативная кат
 | `seo-agent/lib/health.mjs` | Индексация: битые ссылки, каннибализация, авто-рефреш застрявших статей. |
 | `seo-agent/lib/conversion.mjs` | Усилить CTA на страницах с трафиком без заявок. |
 | `seo-agent/lib/indexnow.mjs` | IndexNow-пинг + постановка в очередь переобхода Вебмастера. |
+| `seo-agent/lib/citability.mjs` | **GEO**: детерминированный скорер цитируемости 0-100 (гейт фактчека + отчёт). |
+| `seo-agent/lib/schema.mjs` | **GEO**: генератор JSON-LD @graph (Article/FAQPage/Person/Org/Breadcrumb/speakable). |
+| `seo-agent/lib/llmstxt.mjs` | **GEO**: llms.txt/llms-full.txt по спеке llmstxt.org. |
+| `seo-agent/lib/planner.mjs` | **Агент**: LLM-планировщик приоритетов действий (ветка MODE=agent). |
+| `templates/robots.geo.txt` | **GEO**: robots.txt, разрешающий AI-ботов (в `public/robots.txt`). |
+| `seo-agent/lib/geo-prompt.mjs` | **GEO**: директивы генерации под цитирование (в systemPrompt). |
+| `seo-agent/lib/eeat.mjs` | **GEO**: E-E-A-T скоринг статьи 0-100 (гейт генерации). |
+| `seo-agent/lib/freshness.mjs` | **GEO**: движок свежести 30 дн (кандидаты на рефреш). |
+| `seo-agent/lib/geo-score.mjs` | **GEO**: composite GEO-score для daily-report. |
+| `seo-agent/ai-citation-probe.mjs` | **GEO**: AI Share of Voice (цитируют ли нас нейросети). Cron/CLI. |
+| `seo-agent/brand-mentions.mjs` | **GEO**: Brand Authority Score по RU-площадкам. Cron/CLI. |
+| `seo-agent/lib/serp-intent.mjs` | **SEO**: классификация топ-10 — гейт «выиграет ли статья» перед генерацией. |
+| `seo-agent/lib/drift.mjs` | **SEO**: снапшот+диф SEO-элементов dist/ (ловит потерю schema/canonical/страницы). |
+| `seo-agent/lib/cluster-plan.mjs` | **SEO**: SERP-overlap кластеризация, hub-and-spoke, анти-каннибализация. |
+| `seo-agent/lib/content-brief.mjs` | **SEO**: конкурентный бриф (information gain) в промпт генерации. |
+| `seo-agent/lib/ai-slop.mjs` | **SEO**: измеряемый детектор ИИ-текста (burstiness/клише/разнообразие). |
+| `seo-agent/client.mjs` | **Агентство**: аудит клиентского сайта → отчёт+КП+PDF. CLI. |
+| `seo-agent/lib/client-audit.mjs` | **Агентство**: внешний SEO+GEO аудит чужого сайта (без токенов). |
+| `seo-agent/lib/client-report.mjs` | **Агентство**: печатный HTML-отчёт клиенту (→PDF). |
+| `seo-agent/lib/proposal.mjs` | **Агентство**: КП с тарифами из аудита. |
+| `seo-agent/lib/compare.mjs` | **Агентство**: помесячная динамика (удержание клиента). |
+| `seo-agent/prospect.mjs` | **Агентство**: CRM воронки потенциальных клиентов. CLI. |
 | `bot/bot.mjs` | Telegram-бот: диалог по проекту (через aigate) + резервный лид-эндпоинт. **Проверяет chat_id** — отвечает только владельцу (см. Безопасность). |
 | `bot/max.mjs` | Дублирующее уведомление о заявках в MAX (botapi.max.ru), опционально. |
 | `images/pollinations.mjs` | Основной провайдер картинок — Pollinations.ai, бесплатно, без ключа. |
@@ -191,6 +303,72 @@ t.me/wa.me/vk.me/viber.com/max.ru и т.п., это не нативная кат
 - Все fetch-клиенты ядра уже с `AbortSignal.timeout()` — не убирай при правках, иначе зависший
   внешний сервис вешает весь cron-прогон навсегда без восстановления.
 
+## SEO-усиление (вторая волна, реализовано)
+
+Добраны приёмы из SEO-скиллов (seo-sxo/seo-drift/seo-cluster/seo-content-brief/blog-analyze), адаптированные
+под РФ-стек (Яндекс/xmlstock, без Google/DataForSEO). Все детерминированные или на уже подключённых API.
+
+| Модуль | Файл | Что делает |
+|---|---|---|
+| **SERP-интент гейт** | `lib/serp-intent.mjs` | `classifySerp(keyword, serp)` классифицирует топ-10 (article/aggregator/marketplace/catalog/video) → не тратить генерацию на ключи, где топ занят агрегаторами (статья не выиграет). `filterWinnable()` — фильтр кандидатов ПЕРЕД генерацией. Повышает hit-rate в топ. |
+| **Drift-монитор** | `lib/drift.mjs` | `runDrift(distDir)` — снапшот title/canonical/robots/H1/schema/OG из `dist/` + диф против прошлого. Ловит грабли «Astro молча уронил страницу/schema/canonical/noindex». Без внешних API. В конце деплоя → `driftReportLine()` в daily-report. |
+| **Кластеризация SERP** | `lib/cluster-plan.mjs` | `clusterBySerp(items)` — общий топ-10 = один кластер; hub-and-spoke, матрица перелинковки hub↔spoke, детект каннибализации (ключи с большим overlap → одна страница). Топикал-авторитет. |
+| **Content-brief** | `lib/content-brief.mjs` | `buildBrief(keyword, topSerp, {paa,lsi})` → аутлайн с посекционными объёмами + «information gain» (что конкуренты упустили) → в systemPrompt generate-post. Дифференциация, меньше «клонов». |
+| **AI-slop гейт** | `lib/ai-slop.mjs` | `scoreAiSlop(mdx)` — измеряемый детектор ИИ-текста: burstiness (вариативность длин предложений), банлист клише, лексическое разнообразие → 0-100. Гейт рядом с citability/eeat: ниже порога — прогнать humanizer ещё раз. Даёт МЕТРИКУ шагу очеловечивания. |
+
+**Мелкие догрузки (по матрице, не отдельные модули):** alt-text/webp-чек в image-пайплайне (описательность alt ≤125 симв); `schema.mjs` — LocalBusiness/MedicalClinic для siteType=org/catalog с адресом (vradok/клиники). ⚠️ **FAQPage**: с авг.2023 НЕ даёт Google rich-result для коммерческих сайтов (только gov/health), но остаётся сильным сигналом ДЛЯ AI-цитирования — в `schema.mjs` используется именно ради GEO, не ради Google-сниппета (осознанно).
+
+**Вне скоупа автономного РФ-агента (подтверждено матрицей):** seo-maps/seo-local (нет локального бизнеса — максимум LocalBusiness-схема), seo-google (Вебмастер+Метрика+IndexNow = RU-эквивалент GSC/GA4/CrUX), seo-backlinks/seo-dataforseo (xmlstock+arsenkin+brand-mentions замещают), seo-ecommerce (сайты контентные), seo-firecrawl (свой исходник + xmlstock), seo-hreflang (моноязычные; кроме ilyaegorov RU/EN — точечно).
+
+## Два режима работы + онбординг-бриф
+
+Агент работает в двух режимах (задаётся `mode` + `skills` в `site.profile.mjs`, которые проставляет
+онбординг-бриф при первом запуске):
+
+- **`mode: 'own'` — свой сайт** (как сейчас): автопилот контента + GEO + опц. автономный режим. Данные —
+  из своих Метрики/Вебмастера.
+- **`mode: 'client'` — обслуживание клиентских сайтов** (агентство): внешний аудит чужого сайта без его
+  токенов, клиентские отчёты, КП с тарифами, помесячная динамика, CRM воронки клиентов.
+- **`mode: 'both'`** — и то, и другое.
+
+**Онбординг-бриф → навыки.** Бриф (чек-лист при первом запуске) маршрутизирует ответы в `profile.skills`:
+`contentAutopilot` (генерация статей), `geo` (оптимизация под нейросети), `autonomy` (агент сам решает и
+делает), `agency` (клиентский режим). Код ядра читает эти тумблеры — включаются только выбранные навыки.
+
+## Агентский режим — обслуживание клиентских сайтов
+
+Нужен, когда агентом обслуживают ЧУЖИЕ сайты (продажа SEO/GEO-услуги). Настройка — раздел `agency` в
+профиле (бренд, контакты, пакеты-тарифы). Один вход: `node scripts/seo-agent/client.mjs <cmd> <url>`.
+
+| Инструмент | Файл | Что делает |
+|---|---|---|
+| **Внешний аудит** | `lib/client-audit.mjs` | `auditClientSite(url)` — краулит публичные страницы клиента БЕЗ его токенов, детерминированно считает SEO+GEO (цитируемость, Schema, доступ AI-ботов, llms.txt, on-page, тонкий контент) → score + проблемы по важности + быстрые победы. |
+| **Клиентский отчёт** | `lib/client-report.mjs` | `renderClientReport(audit)` → печатный HTML-отчёт (score-карточки, проблемы, страницы, брендинг агентства). **PDF** = печать HTML в headless-chrome (`chrome --headless --print-to-pdf`). |
+| **КП (коммерческое предложение)** | `lib/proposal.mjs` | `renderProposal(audit)` → HTML КП: проблемы из аудита → что сделаем → рекомендованный пакет (по баллу сайта) → цена → результат. Тарифы из `agency.packages`. |
+| **Динамика (удержание)** | `lib/compare.mjs` | Хранит историю аудитов клиента, `compareLatest(url)` → помесячная дельта score + что починили/что появилось. Для ежемесячного отчёта клиенту. |
+| **CRM лидов** | `prospect.mjs` | Воронка ПОТЕНЦИАЛЬНЫХ КЛИЕНТОВ (не заявки с сайта!): сайт-кандидат → статус (new/contacted/audit_sent/proposal_sent/negotiating/won/lost) → заметки. CLI: `prospect.mjs add\|list\|set\|note`. `fmtFunnel()` в бот. |
+
+`client.mjs`: `audit <url> [Имя]` (аудит + отчёт.html + КП.html + PDF-подсказка), `report`/`kp`/`compare`.
+Результаты — в `data/agency/clients/<url>/`.
+
+## Юр-комплаенс РФ (152-ФЗ / Роскомнадзор) — ОБЯЗАТЕЛЬНО на каждом сайте
+
+Сайт, собирающий заявки (имя/телефон/почту) и использующий Яндекс Метрику, по закону обязан иметь
+4 вещи. Реквизиты оператора берутся из раздела `legal` в `site.profile.mjs` (см. пример). Шаблоны — в
+`scripts/templates/`.
+
+| Требование | Как выполнить | Шаблон |
+|---|---|---|
+| **Политика ТЕКСТОМ на HTML-странице** (НЕ скачиваемый .doc/.pdf — это нарушение) | Скопировать в `src/pages/politika-konfidencialnosti/index.astro`, поправить путь импорта layout | `templates/politika-konfidencialnosti.astro` |
+| **Cookie-баннер + гейтинг Метрики** (аналитика грузится ТОЛЬКО после согласия) | Обернуть счётчик Метрики в `window.__ymLoad` и добавить баннер в конец `<body>` BaseLayout | `templates/cookie-consent.html` |
+| **Чекбокс согласия на формах** (обязательный, форма не шлётся без него) | Вставить в LeadForm перед кнопкой submit | `templates/consent-checkbox.html` |
+| **Реквизиты оператора в подвале** | Строка в Footer: `{legal.entityName}, ОГРНИП {legal.ogrnip}, ИНН {legal.inn}, {legal.address}` + ссылка на политику | из `PROFILE.legal` |
+
+⚠️ Ключевое: Метрика НЕ должна грузиться до клика «Принять» — иначе сбор обезличенных данных без согласия.
+Паттерн `__ymLoad` в шаблоне это решает (грузит только если `localStorage['cookie-consent']==='accepted'`).
+Оператором указывается владелец сайта (ИП/ООО) — данные в `legal`. Ссылку на политику дать в подвале и в
+баннере. `noindex` на самой странице политики (в шаблоне уже стоит).
+
 ## Установка на НОВЫЙ сайт
 
 1. Скопировать `scripts/` + `site.profile.example.mjs` в корень Astro-проекта, переименовать в
@@ -206,7 +384,10 @@ t.me/wa.me/vk.me/viber.com/max.ru и т.п., это не нативная кат
 6. Лиды: положить PHP-форвардер `scripts/lead.php` на хостинг (читает форму, шлёт в Telegram
    +опционально MAX — **вписать реальный TOKEN/CHAT_ID на месте, шаблон в git не хранит секреты**),
    `PUBLIC_LEAD_ENDPOINT=/api/lead.php` (same-origin, без зависимости от VPS).
-7. **Финальная проверка перед cron**: `DRY_RUN=false node scripts/seo-agent/run.mjs` вручную один
+7. **Юр-комплаенс РФ (152-ФЗ)**: заполнить `legal` в `site.profile.mjs`; развернуть 4 шаблона из
+   `scripts/templates/` (политика-страница, cookie-баннер+гейтинг Метрики, чекбокс согласия, реквизиты в
+   подвал) — см. раздел «Юр-комплаенс» выше. Без этого сайт с формой+Метрикой нарушает закон.
+8. **Финальная проверка перед cron**: `DRY_RUN=false node scripts/seo-agent/run.mjs` вручную один
    раз, дождаться реального `Опубликовано: N>0` в логе И проверить, что опубликованный URL
    действительно отдаёт 200 (не только "скрипт не упал" — Astro может молча не собрать страницу).
 8. Ежедневный отчёт: отдельная cron-строка на `daily-report.mjs` (см. ниже), со сдвигом от прогона
