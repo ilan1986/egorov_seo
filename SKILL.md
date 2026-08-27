@@ -318,6 +318,21 @@ t.me/wa.me/vk.me/viber.com/max.ru и т.п., это не нативная кат
 
 **Мелкие догрузки (по матрице, не отдельные модули):** alt-text/webp-чек в image-пайплайне (описательность alt ≤125 симв); `schema.mjs` — LocalBusiness/MedicalClinic для siteType=org/catalog с адресом (vradok/клиники). ⚠️ **FAQPage**: с авг.2023 НЕ даёт Google rich-result для коммерческих сайтов (только gov/health), но остаётся сильным сигналом ДЛЯ AI-цитирования — в `schema.mjs` используется именно ради GEO, не ради Google-сниппета (осознанно).
 
+## SEO-усиление (третья волна — гейты качества, из claude-seo)
+
+Добрано 4 детерминированных модуля (без платных API), вплетены в `daily-report.mjs` блоком **«🔎 Качество и техника»** (мягко: аудит/сигнал в отчёт, НЕ жёсткие блокеры — чтобы не ронять автопилот):
+
+| Модуль | Файл | Что делает |
+|---|---|---|
+| **Гейт дорвейности/тонкости** | `lib/quality-gates.mjs` | `auditQualityFromDist(dist)` — по собранному dist: тонкие страницы (мин. слов по типу), near-duplicate (Jaccard по 4-шинглам, ловит city×niche-клоны), дорвей-гейт (⚠️30+ / 🛑50+ страниц одной «модели»=ниши). Защищает программатик-сетку (vradok/novostroyki/tovaryplus) от санкций за тонкий/дублирующийся контент. |
+| **Тех-аудит on-page** | `lib/onpage-audit.mjs` | `auditDist(dist)` — title/desc-длины, кол-во H1, canonical, noindex на боевой, alt у картинок, наличие JSON-LD, битые внутр. ссылки. Критично/предупреждения в отчёт. |
+| **Валидатор schema** | `lib/schema-validate.mjs` | `validateDist(dist)` / `validateGraph(obj)` — обязательные поля по типу (Article/FAQPage/Person/Breadcrumb…), невалидный JSON-LD, deprecated-типы (HowTo/ClaimReview). |
+| **Core Web Vitals** | `lib/pagespeed.mjs` | `pageSpeed(url)` — LCP/INP/CLS + Perf-score через Google PageSpeed Insights v5 (**бесплатный API, покрывает РФ-домены**). `PAGESPEED_KEY` в `.env` опционален; без ключа быстро упирается в квоту shared-IP → строка «нет данных». |
+
+Проверено на реальном dist novostroyki (196 стр → тонких 125, дорвей-риск blog(76)/novostroyki(60), schema 191 блок 0 крит, тех-аудит 0 крит).
+
+**Тонкие → очередь на обогащение (не шум, а задачи):** `enrichmentQueue(audit, fileForUrl)` (в `lib/quality-gates.mjs`) делит тонкие на **статьи** (есть исходный MDX → `fileForUrl` находит файл) и **карточки каталога** (нет MDX, глубина URL ≥2 — напр. `/novostroyki/жк/` или `/город/ниша/слаг/`; статичные/индексные страницы ≤1 отсеиваются). `daily-report.mjs` каждую ночь пишет `data/enrichment-queue.json` `{articles:[{url,file}], cards:[{url}], nearDup, doorway}` и показывает счётчики в блоке «Качество и техника». `expand-existing.mjs` теперь **читает эту очередь** и добивает до 1500 слов только тонкие статьи, по `EXPAND_LIMIT` (деф. 6) за прогон — работает список задач, а не всё подряд каждый раз. Карточки (`cards`) — вход для ЖК-обогащения (bespoke-пайплайн сайта). Тест novostroyki: 125 тонких → 10 статей (expand) + 108 карточек ЖК (обогащение). ОСТАЛОСЬ: поставить `expand-existing` на cron и подключить потребителя `cards` к ЖК-enrichment на novostroyki. Взято из AgriciDaniel/claude-seo (references/quality-gates.md, seo-technical, seo-schema-validate, pagespeed_check.py), адаптировано под РФ-стек. Не бралось (Google-центрично / есть РФ-аналог): GSC/GA4/Indexing (→ Вебмастер/Метрика/IndexNow), DataForSEO/Ahrefs/Moz (→ xmlstock/Arsenkin), Local/Maps/GBP (→ Яндекс.Бизнес, вне claude-seo), hreflang (уже есть), e-commerce/NLP-entity.
+
 **Вне скоупа автономного РФ-агента (подтверждено матрицей):** seo-maps/seo-local (нет локального бизнеса — максимум LocalBusiness-схема), seo-google (Вебмастер+Метрика+IndexNow = RU-эквивалент GSC/GA4/CrUX), seo-backlinks/seo-dataforseo (xmlstock+arsenkin+brand-mentions замещают), seo-ecommerce (сайты контентные), seo-firecrawl (свой исходник + xmlstock), seo-hreflang (моноязычные; кроме ilyaegorov RU/EN — точечно).
 
 ## Два режима работы + онбординг-бриф

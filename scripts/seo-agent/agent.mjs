@@ -8,9 +8,11 @@ import { CONFIG, ROOT_DIR, readiness } from './config.mjs';
 import { ask } from './lib/aigate.mjs';
 import { TOOLS, invokeTool, toolCatalog, allowedToolNames } from './lib/agent-tools.mjs';
 import { probeCapabilities } from './lib/capabilities.mjs';
-import { goals, dailyBudgetUsd, recentJournal, logDecision, runningExperiments, pendingProposals } from './lib/agent-journal.mjs';
+import { goals, dailyBudgetUsd, dailyPageTarget, pagesPublishedToday, budgetBonusToday, addBudgetBonus, recentJournal, logDecision, runningExperiments, pendingProposals } from './lib/agent-journal.mjs';
 import { metrikaReady, metrikaToday } from './lib/metrika.mjs';
 import { webmasterReady, demandGaps } from './lib/webmaster.mjs';
+import { gscReady, gscDemandGaps, gscTotals } from './lib/gsc.mjs'; // Google — ОПТ-ИН: молчит, пока нет кред
+import { seoInsights } from './lib/insights.mjs'; // striking-distance / просадки / битые ссылки
 
 const DRY = process.env.AGENT_DRY === '1'; // режим наблюдения: решает, но не исполняет
 
@@ -37,14 +39,32 @@ async function perceive() {
   if (metrikaReady()) { try { const m = await metrikaToday(); traffic = { visits: m.visits ?? m.visitors ?? null, pageviews: m.pageviews ?? null }; } catch {} }
   if (webmasterReady()) { try { demand = (await demandGaps({ top: 8 })).map((d) => ({ q: d.query, demand: d.demand })); } catch {} }
 
+  // SEO-инсайты (NeAhrefs-lite): striking-distance, просадки позиций, битые ссылки — на них агент действует.
+  let insights = null;
+  if (webmasterReady()) { try { insights = await seoInsights(pos); } catch {} }
+
+  // Google-канал — ОПТ-ИН: сигнал появляется ТОЛЬКО когда заданы GSC-креды. По умолчанию Яндекс.
+  let google = null;
+  if (gscReady()) {
+    try {
+      const [g, t] = await Promise.all([gscDemandGaps({ top: 8 }), gscTotals().catch(() => null)]);
+      google = { demand_gaps: g.map((d) => ({ q: d.query, demand: d.demand, pos: d.position })), totals: t };
+    } catch {}
+  }
+
   return {
     positions: { top10: arr.filter((x) => x.p <= 10).length, top20: arr.filter((x) => x.p > 10 && x.p <= 20).length, tracked: arr.length, best: arr.slice(0, 6) },
     traffic_today: traffic,
-    demand_gaps: demand,               // высокий спрос, где мы не в топе → кандидаты на генерацию
+    demand_gaps: demand,               // высокий спрос (Яндекс), где мы не в топе → кандидаты на генерацию
+    ...(google ? { google } : {}),     // Google-спрос/трафик — только если канал включён (GSC-креды)
+    ...(insights ? { insights } : {}), // striking_distance / position_drops / broken_links — быстрые точки роста
     ai_sov: sov?.sovPct ?? null,
     brand_authority: brand?.score ?? null,
     ai_spent_today_usd: Math.round(spent * 100) / 100,
-    budget_left_usd: Math.max(0, dailyBudgetUsd() - spent),
+    budget_left_usd: Math.max(0, dailyBudgetUsd() + budgetBonusToday() - spent),
+    page_target: dailyPageTarget() || null,          // дневной план новых страниц (если задан в профиле)
+    pages_published_today: pagesPublishedToday(),
+    pages_left: dailyPageTarget() ? Math.max(0, dailyPageTarget() - pagesPublishedToday()) : null,
     pending_proposals: pendingProposals().length,
     running_experiments: runningExperiments().length,
   };
@@ -55,6 +75,10 @@ const REASON_SYS =
   'заявок/звонков. Ты действуешь как проактивный сотрудник: сам анализируешь состояние и решаешь, какое ОДНО ' +
   'следующее действие даст максимум к цели прямо сейчас. Не жди указаний. Соблюдай ограничения и бюджет. ' +
   'Рискованные действия (виджеты, редизайн, аутрич, крупные траты) — предлагай, их одобрит человек. ' +
+  'ДНЕВНОЙ ПЛАН: если в состоянии задан page_target и pages_left>0 — ПРИОРИТЕТ №1: generate_article, ' +
+  'добивай план новых страниц, пока pages_left>0; только ПОСЛЕ выполнения плана переходи к поддержке ' +
+  '(rewrite_ctr/refresh_stale/expand_thin/ai_probe). Если бюджет кончится раньше плана — stop (человек решит про бюджет). ' +
+  'СИГНАЛЫ insights (быстрые точки роста, приоритетнее случайных тем): striking_distance (запрос на поз.3–20 с высоким спросом — «один пуш = топ-3») → generate_article с этим query ИЛИ refresh_stale/expand_thin страницы под него; position_drops (позиция просела) → refresh_stale/rewrite_ctr по этим запросам в первую очередь; content_decay (теряет показы) → refresh_stale страницы, пока не поздно; crawl_health.problems или broken_links>0 → drift_check или предложи фикс через approve. ' +
   'Отвечай СТРОГО JSON: {"thought":"...", "action":"<имя из каталога|stop>", "args":{...}, "why":"обоснование по данным"}. ' +
   'action:"stop" если ценных действий в бюджете не осталось.';
 
@@ -111,7 +135,8 @@ function parseJsonObject(raw) {
 
 async function main() {
   if (!readiness().aigate && !CONFIG.aigate?.apiKey) { console.log('aigate не настроен — автономный режим невозможен'); return; }
-  const MAX_CYCLES = Number(process.env.AGENT_MAX_CYCLES || 6);
+  // Циклов хватает на план новых страниц + поддержку (иначе 6 обрежет большой page_target).
+  const MAX_CYCLES = Number(process.env.AGENT_MAX_CYCLES || Math.max(6, dailyPageTarget() + 4));
   const done = [];
 
   // Зонд возможностей сервера: агенту доступны ТОЛЬКО реально поддержанные инструменты.
@@ -162,8 +187,8 @@ async function main() {
     budgetHit ? `\n💸 <b>Уперся в дневной бюджет $${dailyBudgetUsd()}</b> — работа прервана, есть что ещё сделать. Поднять бюджет на сегодня? Ответь суммой (<code>/budget +1</code>) или оставь до завтра. Решаем вместе.` : '',
   ].filter(Boolean);
   try {
-    const { sendMessage } = await import('../bot/telegram.mjs');
-    if (readiness().telegram) await sendMessage(lines.join('\n'));
+    const { sendReportLines } = await import('../bot/rich.mjs');
+    if (readiness().telegram) await sendReportLines(lines);
   } catch {}
   console.log('[agent] готово:', done.length, 'действий,', proposals.length, 'на согласовании', budgetHit ? '(бюджет исчерпан — уведомил бот проекта)' : '');
 }

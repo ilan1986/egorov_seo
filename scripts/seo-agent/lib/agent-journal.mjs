@@ -18,14 +18,44 @@ const rid = () => stamp().replace(/[^0-9]/g, '').slice(2, 14) + Math.floor(Math.
 /** Цели агента из профиля (что значит «результат»). */
 export function goals() {
   return PROFILE.goals || {
-    primary: 'ежедневно растить органический трафик и число заявок/звонков',
-    kpis: ['визиты из поиска', 'позиции топ-10', 'заявки', 'AI Share of Voice'],
+    primary: 'растить трафик и заявки из ДВУХ каналов: поиск (SEO) и нейросети (GEO). ГЛАВНАЯ цель — цитируемость сайта нейросетями (Алиса, GPT, Gemini): нейронки цитируют тех, кто даёт МАКСИМУМ уникальной пользы. Значит каждая страница должна нести оригинальные данные/цифры/сравнения, отвечать сразу и по делу, быть исчерпывающей и авторитетной (эксперт + источники).',
+    kpis: ['AI Share of Voice — цитируют ли нас нейросети (по 3 движкам)', 'визиты из поиска', 'позиции топ-10', 'заявки/звонки'],
+    geoLevers: ['оригинальные данные и первоисточники (то, чего нет у конкурентов)', 'ответ-сразу + структура (заголовки, таблицы, списки, FAQ)', 'исчерпывающая глубина по теме', 'явная авторитетность (автор-эксперт, Person/Article schema, ссылки на источники)', 'уникальность (не пересказ, а польза)'],
     constraints: ['не выдумывать факты', 'соблюдать E-E-A-T и 152-ФЗ', 'держаться дневного бюджета'],
   };
 }
 
 export function dailyBudgetUsd() { return PROFILE.autonomy?.dailyBudgetUsd ?? 3; }
 export function autoApproveRisk() { return PROFILE.autonomy?.autoApprove ?? false; }
+
+/** Дневной план новых страниц (0 = без явного плана, агент сам решает микс). */
+export function dailyPageTarget() { return PROFILE.autonomy?.dailyPageTarget ?? 0; }
+
+/** Сколько новых страниц уже опубликовано СЕГОДНЯ (успешные generate_article в журнале). */
+export function pagesPublishedToday() {
+  const day = stamp().slice(0, 10);
+  try {
+    return readFileSync(JOURNAL, 'utf-8').trim().split('\n')
+      .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
+      .filter((j) => j.action === 'generate_article' && j.status === 'done' && String(j.ts).slice(0, 10) === day).length;
+  } catch { return 0; }
+}
+
+const BONUS = join(DIR, 'budget-bonus.json'); // { 'YYYY-MM-DD': usd } — разовые добавки к дневному бюджету через /budget
+/** Сколько $ добавлено к сегодняшнему бюджету вручную (/budget +N). */
+export function budgetBonusToday() {
+  const day = stamp().slice(0, 10);
+  return Number(readJson(BONUS, {})[day]) || 0;
+}
+/** Поднять сегодняшний бюджет на usd (вернёт накопленный бонус за день). */
+export function addBudgetBonus(usd) {
+  ensure();
+  const day = stamp().slice(0, 10);
+  const b = readJson(BONUS, {});
+  b[day] = (Number(b[day]) || 0) + Number(usd || 0);
+  writeFileSync(BONUS, JSON.stringify(b, null, 2), 'utf-8');
+  return b[day];
+}
 
 /** Записать решение/действие в журнал (для обучения и прозрачности). */
 export async function logDecision(entry) {

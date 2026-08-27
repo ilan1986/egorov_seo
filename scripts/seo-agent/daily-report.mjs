@@ -5,12 +5,17 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join } from 'node:path';
 import { ROOT_DIR, readiness } from './config.mjs';
 import { metrikaReady, metrikaToday, trafficSourcesToday } from './lib/metrika.mjs';
-import { webmasterReady, popularQueries, summary as webmasterSummary } from './lib/webmaster.mjs';
+import { webmasterReady, popularQueries, summary as webmasterSummary, demandGaps } from './lib/webmaster.mjs';
 import { balance as contentwatchBalance, contentwatchReady } from './lib/contentwatch.mjs';
 import { credits as kieCredits } from '../images/kie-nb2.mjs';
 import { getCosts } from './lib/cost-ledger.mjs';
-import { existingPages } from './lib/content.mjs';
+import { auditQualityFromDist, qualityReportLine, enrichmentQueue } from './lib/quality-gates.mjs';
+import { auditDist, onpageReportLine } from './lib/onpage-audit.mjs';
+import { validateDist, schemaReportLine } from './lib/schema-validate.mjs';
+import { pageSpeed, cwvReportLine } from './lib/pagespeed.mjs';
+import { existingPages, fileForUrl } from './lib/content.mjs';
 import { sendMessage, escapeHtml } from '../bot/telegram.mjs';
+import { sendReportLines } from '../bot/rich.mjs';
 import { PROFILE } from '../../site.profile.mjs';
 
 const STATE_FILE = join(ROOT_DIR, 'scripts/seo-agent/data/report-state.json');
@@ -116,6 +121,22 @@ async function main() {
     lines.push('', '<b>🔍 Позиции в поиске</b>', 'Я.Вебмастер не настроен.');
   }
 
+  // ── БЛОК Высокий спрос, мы не в топе (DEMAND) ──
+  // Эти же запросы агент берёт в работу (генерацию новых страниц) на ночном прогоне run.mjs.
+  if (webmasterReady()) {
+    try {
+      const gaps = await demandGaps({ top: 6 });
+      if (gaps.length) {
+        lines.push(
+          '',
+          '<b>📈 Высокий спрос, мы не в топе</b>',
+          ...gaps.map((g) => `• ${escapeHtml(g.query)} — спрос ${g.demand.toFixed(2)}`),
+          '<i>Эти запросы автоматически в очереди на генерацию.</i>',
+        );
+      }
+    } catch { /* игнор — блок необязательный */ }
+  }
+
   // ── БЛОК Рекомендации ──
   const recs = [];
   if (metrikaReady()) {
@@ -129,9 +150,10 @@ async function main() {
   // ── БЛОК Расходы в $ за сегодня ──
   const costs = getCosts();
   const cwToday = contentwatchReady() ? await contentwatchBalance().catch(() => null) : null;
-  const kieToday = await kieCredits().catch(() => null);
   const cwSpentRub = cwToday && state.cwBalance != null ? Math.max(0, state.cwBalance - cwToday.balance) : null;
-  const kieSpentCredits = kieToday != null && state.kieBalance != null ? Math.max(0, state.kieBalance - kieToday) : null;
+  const kieBal = await kieCredits().catch(() => null);       // общий баланс аккаунта (справочно)
+  const kieImgs = costs.calls['kie'] || 0;                    // свои картинки этого проекта за день
+  const kieUsd = costs.usd['kie'] || 0;                       // реальный $ этого проекта
 
   lines.push(
     '',
@@ -141,18 +163,32 @@ async function main() {
     cwSpentRub != null ? `Проверка текстов content-watch.ru: ${cwSpentRub.toFixed(2)}₽` : 'Проверка текстов content-watch.ru: нет данных за прошлый отчёт (баланс сохранён на завтра)',
     `Сервис Arsenkin: ${sumCalls(costs.calls, 'arsenkin-')} запрос(ов) (баланс через API не публикует — фиксировано подпиской)`,
     `Сервис xmlstock: ${costs.calls['xmlstock'] || 0} запрос(ов) (баланс через API не публикует)`,
-    kieSpentCredits != null ? `Сервис kie.ai: ${kieSpentCredits} кредитов (~${fmtUsd(kieSpentCredits * 0.01)})` : 'Сервис kie.ai: нет данных за прошлый отчёт (баланс сохранён на завтра)',
+    kieImgs > 0 ? `Сервис kie.ai: ${kieImgs} картинок (~${fmtUsd(kieUsd)})` : 'Сервис kie.ai: не использовался (картинки — Pollinations, бесплатно)',
   );
+  if (kieBal != null) lines.push(`<i>Баланс kie.ai (общий аккаунт): ${Math.round(kieBal)} кредитов</i>`);
+
+  // ── БЛОК Качество и техника (гейты качества, адаптировано из claude-seo) ──
+  try {
+    const distDir = join(ROOT_DIR, 'dist');
+    const qa = auditQualityFromDist(distDir);
+    const oa = existsSync(distDir) ? auditDist(distDir) : null;
+    const sc = validateDist(distDir);
+    const siteUrl = process.env.SITE_URL || '';
+    const ps = siteUrl ? await pageSpeed(siteUrl, { strategy: 'mobile' }).catch(() => null) : null;
+    let enqLine = null;
+    if (qa) { try { const enq = enrichmentQueue(qa, fileForUrl); writeFileSync(join(ROOT_DIR, 'scripts/seo-agent/data/enrichment-queue.json'), JSON.stringify(enq, null, 2)); enqLine = `В очереди на обогащение: ${enq.articles.length} статей (expand-existing) · ${enq.cards.length} карточек (ЖК-обогащение)`; } catch {} }
+    const qlines = [qualityReportLine(qa), enqLine, onpageReportLine(oa), schemaReportLine(sc), ps ? cwvReportLine(ps) : null].filter(Boolean);
+    if (qlines.length) lines.push('', '<b>🔎 Качество и техника</b>', ...qlines.map((l) => '• ' + l));
+  } catch (e) { /* необязательный блок */ }
 
   // ── Сохранить состояние на завтра ──
   if (indexedToday != null) state.indexedPages = indexedToday;
   if (cwToday) state.cwBalance = cwToday.balance;
-  if (kieToday != null) state.kieBalance = kieToday;
   saveState(state);
 
   const report = lines.filter((l) => l !== undefined).join('\n');
   console.log(report.replace(/<\/?b>/g, ''));
-  if (readiness().telegram) await sendMessage(report, { parseMode: 'HTML' });
+  if (readiness().telegram) await sendReportLines(lines);
 }
 
 function sumCalls(calls, prefix) {

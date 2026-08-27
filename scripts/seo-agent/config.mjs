@@ -16,6 +16,40 @@ const env = (k, def = '') => process.env[k] ?? def;
 
 export const ROOT_DIR = ROOT;
 
+// LLM-провайдеры по порядку приоритета: основной + резервы (клиент перебирает по кругу при сбое).
+// Каждый OpenAI-совместим. Модели у провайдеров называются по-разному — генерация Sonnet-класс, диалог дешевле.
+// Ключи и модели можно переопределить в .env; провайдер без ключа автоматически пропускается.
+const PROVIDERS = [
+  {
+    name: 'aigate',
+    baseUrl: env('AIGATE_BASE_URL', 'https://api.aigate.shop/v1'),
+    key: env('AIGATE_API_KEY'),
+    model: env('AIGATE_MODEL', 'anthropic/claude-sonnet-4.6'),
+    dialogModel: env('AIGATE_DIALOG_MODEL', env('DIALOG_MODEL', 'deepseek/deepseek-v4')),
+  },
+  {
+    name: 'closerouter',
+    baseUrl: env('CLOSEROUTER_BASE_URL', 'https://api.closerouter.dev/v1'),
+    key: env('CLOSEROUTER_API_KEY'),
+    model: env('CLOSEROUTER_MODEL', 'anthropic/claude-sonnet-4.6'),
+    dialogModel: env('CLOSEROUTER_DIALOG_MODEL', 'openai/gpt-5.4-mini'),
+  },
+  {
+    name: 'anymodel',
+    baseUrl: env('ANYMODEL_BASE_URL', 'https://anymodel.org/v1'),
+    key: env('ANYMODEL_API_KEY'),
+    model: env('ANYMODEL_MODEL', 'cc/claude-sonnet-4-6'),
+    dialogModel: env('ANYMODEL_DIALOG_MODEL', 'cx/gpt-5.4-mini'),
+  },
+  {
+    name: 'wellflow',
+    baseUrl: env('WELLFLOW_BASE_URL', 'https://api.wellflow.dev/v1'),
+    key: env('WELLFLOW_API_KEY'),
+    model: env('WELLFLOW_MODEL', 'qwen3.7-max'),
+    dialogModel: env('WELLFLOW_DIALOG_MODEL', 'qwen3.5-flash'),
+  },
+];
+
 export const CONFIG = {
   siteUrl: env('SITE_URL', 'https://example.ru'),
 
@@ -24,12 +58,8 @@ export const CONFIG = {
     key: env('XMLSTOCK_KEY'),
     lr: env('XMLSTOCK_LR', '225'),
   },
-  aigate: {
-    baseUrl: env('AIGATE_BASE_URL', 'https://api.aigate.shop/v1'),
-    key: env('AIGATE_API_KEY'),
-    model: env('AIGATE_MODEL', 'anthropic/claude-sonnet-4.6'),
-    dialogModel: env('DIALOG_MODEL', 'deepseek/deepseek-v4'),
-  },
+  providers: PROVIDERS,
+  aigate: PROVIDERS[0], // обратная совместимость: основной провайдер (aigate)
   textru: {
     key: env('TEXTRU_KEY'),
     minUnique: Number(env('TEXTRU_MIN_UNIQUE', '82')),
@@ -54,6 +84,18 @@ export const CONFIG = {
   arsenkin: {
     key: env('ARSENKIN_API_KEY'),
     region: Number(env('ARSENKIN_REGION', '225')),
+  },
+  // Topvisor — трекинг позиций (в т.ч. Google). ОПТ-ИН: работает только если задан ключ+User-Id.
+  // ВАЖНО: User-Id — ЧИСЛОВОЙ id аккаунта (напр. 3962), НЕ email. Иначе «Authorisation error».
+  topvisor: {
+    userId: env('TOPVISOR_USER_ID', env('TOPVISOR_LOGIN')), // числовой id (обратная совместимость)
+    key: env('TOPVISOR_KEY'),          // API-ключ
+    projectId: env('TOPVISOR_PROJECT_ID'),
+  },
+  // Google-канал — ОПТ-ИН: по умолчанию агент на Яндексе. Включается кредами GSC (см. lib/gsc.mjs).
+  google: {
+    saJson: env('GOOGLE_SA_JSON'),
+    gscSite: env('GSC_SITE_URL'),
   },
   indexNowKey: env('INDEXNOW_KEY'),
   telegram: {
@@ -83,6 +125,8 @@ export function readiness() {
     yandexMetrika: Boolean(CONFIG.yandexMetrika.token),
     telegram: Boolean(CONFIG.telegram.token),
     arsenkin: Boolean(CONFIG.arsenkin.key),
+    topvisor: Boolean(CONFIG.topvisor.key && CONFIG.topvisor.userId),
+    google: Boolean(CONFIG.google.saJson && CONFIG.google.gscSite), // Google-канал включён (опт-ин)
   };
 }
 

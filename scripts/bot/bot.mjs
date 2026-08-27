@@ -55,7 +55,7 @@ async function handleMessage(msg) {
   try {
     const reply = await chat(
       [{ role: 'system', content: SYSTEM_PROMPT }, ...(history.get(chatId) ?? [])],
-      { modelOverride: DIALOG_MODEL, temperature: 0.6, maxTokens: 1200, costCategory: 'dialog' }
+      { tier: 'dialog', temperature: 0.6, maxTokens: 1200, costCategory: 'dialog' }
     );
     pushHistory(chatId, 'assistant', reply);
     await sendMessage(escapeHtml(reply), { chatId, parseMode: 'HTML' });

@@ -1,6 +1,7 @@
 // Массовое расширение существующих страниц до ≥1500 слов тела.
 // Фронтматтер сохраняется ДОСЛОВНО, расширяется только тело. Запуск: node scripts/seo-agent/expand-existing.mjs
-import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { ROOT_DIR } from './config.mjs';
 import { join } from 'node:path';
 import { ask } from './lib/aigate.mjs';
 import { sanitizeMdx } from './lib/generate-post.mjs';
@@ -29,7 +30,18 @@ const walk = (d) => {
 
 const pool = internalLinkPool();
 const links = pool.map((l) => `- ${l.title}: ${l.url}`).join('\n');
-const files = contentDirs().flatMap(walk);
+// Приоритет — очередь тонких из quality-gates (data/enrichment-queue.json): работаем список задач.
+const LIMIT = Number(process.env.EXPAND_LIMIT || 6);
+let files;
+try {
+  const q = JSON.parse(readFileSync(join(ROOT_DIR, 'scripts/seo-agent/data/enrichment-queue.json'), 'utf-8'));
+  if (Array.isArray(q.articles) && q.articles.length) {
+    files = q.articles.map((a) => a.file).filter((f) => { try { return existsSync(f); } catch { return false; } });
+    console.log(`[expand] очередь на обогащение: ${files.length} тонких статей (лимит ${LIMIT}/прогон)`);
+  }
+} catch { /* нет очереди — расширяем всё */ }
+if (!files) files = contentDirs().flatMap(walk);
+files = files.slice(0, LIMIT);
 
 let expanded = 0, skipped = 0;
 for (const f of files) {
