@@ -19,14 +19,8 @@ export const ROOT_DIR = ROOT;
 // LLM-провайдеры по порядку приоритета: основной + резервы (клиент перебирает по кругу при сбое).
 // Каждый OpenAI-совместим. Модели у провайдеров называются по-разному — генерация Sonnet-класс, диалог дешевле.
 // Ключи и модели можно переопределить в .env; провайдер без ключа автоматически пропускается.
+// AiGate ИСКЛЮЧЁН из цепочки (сервис закрыт, 26.08.2026) — основной теперь closerouter.
 const PROVIDERS = [
-  {
-    name: 'aigate',
-    baseUrl: env('AIGATE_BASE_URL', 'https://api.aigate.shop/v1'),
-    key: env('AIGATE_API_KEY'),
-    model: env('AIGATE_MODEL', 'anthropic/claude-sonnet-4.6'),
-    dialogModel: env('AIGATE_DIALOG_MODEL', env('DIALOG_MODEL', 'deepseek/deepseek-v4')),
-  },
   {
     name: 'closerouter',
     baseUrl: env('CLOSEROUTER_BASE_URL', 'https://api.closerouter.dev/v1'),
@@ -59,7 +53,7 @@ export const CONFIG = {
     lr: env('XMLSTOCK_LR', '225'),
   },
   providers: PROVIDERS,
-  aigate: PROVIDERS[0], // обратная совместимость: основной провайдер (aigate)
+  aigate: PROVIDERS[0], // обратная совместимость: alias на ОСНОВНОЙ провайдер (теперь closerouter, aigate убран)
   textru: {
     key: env('TEXTRU_KEY'),
     minUnique: Number(env('TEXTRU_MIN_UNIQUE', '82')),

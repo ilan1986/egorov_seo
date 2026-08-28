@@ -1,6 +1,7 @@
 // LLM-клиент с мультипровайдерным фолбэком (OpenAI-совместимый).
-// Основной провайдер — aigate; при сбое (502/timeout/пустой ответ) клиент по кругу
-// пробует резервы closerouter → anymodel → wellflow. Порядок и ключи — в config.mjs / .env.
+// Основной провайдер — closerouter; при сбое (502/timeout/пустой ответ) клиент по кругу
+// пробует резервы anymodel → wellflow. Порядок и ключи — в config.mjs / .env.
+// (сервис aigate выведен из цепочки — больше не используется.)
 import { CONFIG, DEFAULT_HEADERS } from '../config.mjs';
 import { logCostUsd } from './cost-ledger.mjs';
 
