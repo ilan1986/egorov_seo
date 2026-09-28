@@ -19,21 +19,41 @@ export const ROOT_DIR = ROOT;
 // LLM-провайдеры по порядку приоритета: основной + резервы (клиент перебирает по кругу при сбое).
 // Каждый OpenAI-совместим. Модели у провайдеров называются по-разному — генерация Sonnet-класс, диалог дешевле.
 // Ключи и модели можно переопределить в .env; провайдер без ключа автоматически пропускается.
-// AiGate ИСКЛЮЧЁН из цепочки (сервис закрыт, 26.08.2026) — основной теперь closerouter.
+//
+// Локальный llm-proxy (AIGATE_BASE_URL, напр. http://127.0.0.1:8791/v1): если он поднят на VPS —
+// делаем ЕГО основным. У прокси свой устойчивый внутренний фолбэк (aigate→closerouter→anymodel→wellflow
+// + подмена модели), и он на localhost: быстрый ответ без ожидания внешних 502/зависаний closerouter и
+// anymodel (из-за которых прогон генерации мог висеть до 200с на каждый шаг и фактически не производить
+// контент). Ключ прокси не требуется (локальный сервис игнорирует Authorization), но фильтр провайдеров
+// в aigate.mjs требует truthy key — поэтому подставляем 'local', когда AIGATE_API_KEY пуст. Прямые
+// closerouter/anymodel/wellflow остаются резервами на случай падения самого прокси.
+const AIGATE_BASE = env('AIGATE_BASE_URL').replace(/\/+$/, '');
+const PROXY = AIGATE_BASE
+  ? [{
+      name: 'llm-proxy',
+      baseUrl: AIGATE_BASE,
+      key: env('AIGATE_API_KEY') || 'local',
+      model: env('AIGATE_MODEL', 'anthropic/claude-sonnet-4.6'),
+      dialogModel: env('AIGATE_DIALOG_MODEL', env('DIALOG_MODEL', 'google/gemini-3.7-flash')),
+    }]
+  : [];
 const PROVIDERS = [
+  ...PROXY,
   {
     name: 'closerouter',
     baseUrl: env('CLOSEROUTER_BASE_URL', 'https://api.closerouter.dev/v1'),
     key: env('CLOSEROUTER_API_KEY'),
     model: env('CLOSEROUTER_MODEL', 'anthropic/claude-sonnet-4.6'),
-    dialogModel: env('CLOSEROUTER_DIALOG_MODEL', 'openai/gpt-5.4-mini'),
+    // openai/gpt-5.4-mini у closerouter отдаёт 502 «no healthy provider route» (12.09.2026)
+    dialogModel: env('CLOSEROUTER_DIALOG_MODEL', 'google/gemini-3.7-flash'),
   },
   {
     name: 'anymodel',
     baseUrl: env('ANYMODEL_BASE_URL', 'https://anymodel.org/v1'),
     key: env('ANYMODEL_API_KEY'),
     model: env('ANYMODEL_MODEL', 'cc/claude-sonnet-4-6'),
-    dialogModel: env('ANYMODEL_DIALOG_MODEL', 'cx/gpt-5.4-mini'),
+    // cx/gpt-5.4-mini снят anymodel 08.09.2026 (404 с подсказкой перейти на другую модель)
+    dialogModel: env('ANYMODEL_DIALOG_MODEL', 'ag/gemini-3.7-flash-medium'),
   },
   {
     name: 'wellflow',
@@ -44,6 +64,16 @@ const PROVIDERS = [
   },
 ];
 
+/**
+ * Порядок провайдеров можно переопределить: LLM_PRIMARY=anymodel поднимает названного
+ * наверх, остальные остаются резервом в прежнем порядке. Нужно, когда основную нагрузку
+ * должен нести конкретный аккаунт — например, ключ клиента, а не общий пул подрядчика.
+ */
+const PRIMARY = env('LLM_PRIMARY').trim().toLowerCase();
+const ORDERED = PRIMARY
+  ? [...PROVIDERS].sort((a, b) => (a.name === PRIMARY ? -1 : b.name === PRIMARY ? 1 : 0))
+  : PROVIDERS;
+
 export const CONFIG = {
   siteUrl: env('SITE_URL', 'https://example.ru'),
 
@@ -52,8 +82,8 @@ export const CONFIG = {
     key: env('XMLSTOCK_KEY'),
     lr: env('XMLSTOCK_LR', '225'),
   },
-  providers: PROVIDERS,
-  aigate: PROVIDERS[0], // обратная совместимость: alias на ОСНОВНОЙ провайдер (теперь closerouter, aigate убран)
+  providers: ORDERED,
+  aigate: ORDERED[0], // алиас основного провайдера для обратной совместимости (сервис aigate выведен из цепочки — теперь это closerouter)
   textru: {
     key: env('TEXTRU_KEY'),
     minUnique: Number(env('TEXTRU_MIN_UNIQUE', '82')),
@@ -95,6 +125,7 @@ export const CONFIG = {
   telegram: {
     token: env('TELEGRAM_BOT_TOKEN'),
     chatId: env('TELEGRAM_CHAT_ID'),
+    siteTag: env('SITE_TAG'),
     leadPort: Number(env('LEAD_PORT', '8787')),
   },
   max: {

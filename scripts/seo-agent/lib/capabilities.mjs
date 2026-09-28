@@ -35,9 +35,12 @@ export async function probeCapabilities(opts = {}) {
   const cap = (key, name, ok, enables, fallback = null) => ({ key, name, ok, enables, fallback });
   const capabilities = [
     // Контент/семантика
-    cap('llm', 'Генерация/оценка контента (AiGate)', envHas('AIGATE_API_KEY'), 'генерация страниц, quality-gate, ИИ-чат', 'без ключа — контент-модули не работают'),
-    cap('semantics', 'Семантика (Wordstat/Arsenkin/XML)', envHas('ARSENKIN_TOKEN') || envHas('XMLSTOCK_KEY') || envHas('WORDSTAT_TOKEN'), 'реальная частотность ключей, SERP-анализ', 'без ключей — только эвристики, риск выдумок'),
-    cap('quality_gate', 'Quality-gate (promptfoo)', promptfoo && envHas('AIGATE_API_KEY'), 'блокировка слабого/водянистого контента до публикации', 'без него — только правило мин. объёма'),
+    // llm — ЛЮБОЙ провайдер цепочки фолбэка (aigate/closerouter/anymodel/wellflow) или локальный прокси (AIGATE_BASE_URL).
+    // Раньше гейт был только на AIGATE_API_KEY → если он пуст (напр. Врадок на прокси), generate_article выпадал из
+    // каталога и агент НЕ МОГ генерить статьи, хотя LLM реально работал через резерв. Теперь отражает реальную доступность.
+    cap('llm', 'Генерация/оценка контента (LLM)', envHas('AIGATE_API_KEY') || envHas('CLOSEROUTER_API_KEY') || envHas('ANYMODEL_API_KEY') || envHas('WELLFLOW_API_KEY') || envHas('AIGATE_BASE_URL'), 'генерация страниц, quality-gate, ИИ-чат', 'без ключей — контент-модули не работают'),
+    cap('semantics', 'Семантика (Wordstat/Arsenkin/XML)', envHas('ARSENKIN_TOKEN') || envHas('ARSENKIN_API_KEY') || envHas('XMLSTOCK_KEY') || envHas('WORDSTAT_TOKEN'), 'реальная частотность ключей, SERP-анализ', 'без ключей — только эвристики, риск выдумок'),
+    cap('quality_gate', 'Quality-gate (promptfoo)', promptfoo && (envHas('AIGATE_API_KEY') || envHas('CLOSEROUTER_API_KEY') || envHas('AIGATE_BASE_URL')), 'блокировка слабого/водянистого контента до публикации', 'без него — только правило мин. объёма'),
     // Аудит/краулинг
     cap('deep_crawl', 'Глубокий аудит + JS-сайты (Crawlee)', crawlee, 'обход всего сайта, битые ссылки, парсер lead-gen', 'без него — быстрый аудит по 6 URL из sitemap'),
     cap('js_render', 'Рендер SPA/JS-сайтов (Playwright)', playwright, 'аудит клиент-рендер сайтов (React/Vue)', 'без него — только статический HTML'),

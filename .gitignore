@@ -15,6 +15,10 @@ logs/
 *.bak2
 *.geobak
 
+# VPS-fleet-специфичные скрипты раскатки (завязаны на /opt/seo-agent-core + sites.list,
+# не нужны для одиночной установки на новый сайт)
+scripts/deploy/
+
 # зависимости и сборка
 node_modules/
 dist/

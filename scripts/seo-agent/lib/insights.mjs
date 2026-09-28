@@ -23,9 +23,9 @@ export async function seoInsights(priorPositions = {}) {
   let q = [];
   try { q = await popularQueries({ limit: 200 }); } catch { return null; }
 
-  // Striking distance: поз. 3–20, есть показы, CTR низкий (есть куда расти). Сорт по показам.
+  // Striking distance: поз. 11–20 (уже близко, но НЕ в топ-10), есть показы, CTR низкий (есть куда расти). Сорт по показам.
   const striking = q
-    .filter((x) => x.position != null && x.position >= 3 && x.position <= 20 && (x.shows ?? 0) >= 4)
+    .filter((x) => x.position != null && x.position >= 11 && x.position <= 20 && (x.shows ?? 0) >= 4)
     .map((x) => ({ query: x.query, pos: Math.round(x.position * 10) / 10, shows: x.shows, clicks: x.clicks, ctr: x.shows ? +(x.clicks / x.shows).toFixed(3) : 0 }))
     .sort((a, b) => b.shows - a.shows)
     .slice(0, 8);

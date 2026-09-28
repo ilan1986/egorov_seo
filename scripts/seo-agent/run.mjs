@@ -13,7 +13,7 @@ import { popularQueries, webmasterReady, recrawl } from './lib/webmaster.mjs';
 import { pageStats, metrikaReady, metrikaTotals, metrikaLanding, metrikaSources, metrikaPhrases, counterHealth } from './lib/metrika.mjs';
 import { optimizeCtr, demandGaps } from './lib/ctr-optimize.mjs';
 import { optimizeConversions } from './lib/conversion.mjs';
-import { gatherHealth, fixIndexation, refreshCandidates, bounceCandidates, refreshPage, formatHealth, describeBrokenLinks, keywordCannibalization } from './lib/health.mjs';
+import { gatherHealth, fixIndexation, resubmitUnindexed, refreshCandidates, bounceCandidates, refreshPage, formatHealth, describeBrokenLinks, keywordCannibalization } from './lib/health.mjs';
 import { arsenkinReady, lsiTerms, paaQuestions, wordstat, relevantUrls } from './lib/arsenkin.mjs';
 import {
   existingPages, internalLinkPool, loadUsedQueries, saveUsedQueries, writeBlogPost,
@@ -22,6 +22,7 @@ import {
 import { generatePost, factcheckPost } from './lib/generate-post.mjs';
 import { checkUniqueness } from './lib/uniqueness.mjs';
 import { indexNowPing } from './lib/indexnow.mjs';
+import { isBlockedKeyword } from './lib/blocklist.mjs';
 import { sendMessage, escapeHtml } from '../bot/telegram.mjs';
 import { PROFILE } from '../../site.profile.mjs';
 
@@ -31,12 +32,44 @@ const created = [], skipped = [], errors = [];
 const today = () => new Date().toISOString().slice(0, 10);
 const bodyOf = (mdx) => mdx.match(/^---\n[\s\S]*?\n---\n([\s\S]*)$/)?.[1] || mdx;
 
+let buildAlerted = false; // чтобы main().catch не слал второй алерт
+
+// Прогнать команду, сохранив вывод в cron-лог; вернуть {ok, out} вместо падения.
+function runStep(cmd) {
+  try {
+    const out = execSync(cmd, { cwd: ROOT_DIR, stdio: 'pipe' });
+    process.stdout.write(out);
+    return { ok: true, out: out.toString() };
+  } catch (e) {
+    const out = (e.stdout?.toString() || '') + (e.stderr?.toString() || '');
+    process.stdout.write(out);
+    return { ok: false, out };
+  }
+}
+
+// Оповестить в Telegram о провале сборки/деплоя. Раньше build падал ДО отправки отчёта, и сайт
+// молча стоял днями (nalog: 15 дней, vradok: 8) — теперь падение видно на следующее утро.
+async function alertBuildFail(stage, out) {
+  buildAlerted = true;
+  const loc = out.match(/[^\s]+\.mdx:\d+:\d+/)?.[0] || out.match(/src\/content\/[^\s]+\.mdx/)?.[0] || '';
+  const tail = out.split('\n').filter(Boolean).slice(-6).join('\n').slice(0, 600);
+  const msg = [
+    `🛑 <b>${escapeHtml(CONFIG.siteName || CONFIG.siteUrl || 'сайт')}: ${escapeHtml(stage)} УПАЛ(А)</b>`,
+    'Сайт не обновился, сгенерированные страницы не опубликованы.',
+    loc ? `\nФайл: <code>${escapeHtml(loc)}</code>` : '',
+    tail ? `\n<code>${escapeHtml(tail)}</code>` : '',
+  ].filter(Boolean).join('\n');
+  try { if (readiness().telegram) await sendMessage(msg); } catch (e) { log('telegram-alert:', e.message); }
+}
+
 async function deployAndPing(extraUrls = []) {
   updateLlmsTxt();
   log('сборка + деплой…');
   const PY = process.platform === 'win32' ? 'python' : 'python3';
-  execSync('npm run build', { cwd: ROOT_DIR, stdio: 'inherit' });
-  execSync(`${PY} scripts/deploy-ftp.py`, { cwd: ROOT_DIR, stdio: 'inherit' });
+  const build = runStep('npm run build');
+  if (!build.ok) { await alertBuildFail('НОЧНАЯ СБОРКА', build.out); throw new Error('build failed'); }
+  const deploy = runStep(`${PY} scripts/deploy-ftp.py`);
+  if (!deploy.ok) { await alertBuildFail('ДЕПЛОЙ (FTP)', deploy.out); throw new Error('deploy failed'); }
   const urls = [...created.map((u) => `${CONFIG.siteUrl}${u}`), ...extraUrls];
   const idx = await indexNowPing([CONFIG.siteUrl + '/', ...urls]);
   log('переиндексация:', JSON.stringify(idx));
@@ -49,7 +82,7 @@ async function publishFromQueue(limit) {
   const accepted = [];
   for (const file of files) {
     if (accepted.length >= limit) break;
-    const slug = file.replace(/.*[\\/]q-\d+-/, '').replace(/\.mdx?$/, '');
+    const slug = file.replace(/.*[\\/]q-(?:[a-z]+-)?\d+-/, '').replace(/\.mdx?$/, ''); // поддержка q-ch-<id>- (темы канала), иначе slug=полный путь → статья в articles/opt/...
     if (blogPostExists(slug)) { rmSync(file); continue; }
     let mdx = readFileSync(file, 'utf-8').replace(/^pubDate:.*$/m, `pubDate: ${today()}`);
     if (readiness().uniqueness) {
@@ -106,6 +139,7 @@ async function liveGenerate() {
   const fresh = candidates.filter((q) => {
     const ql = q.toLowerCase();
     if (used.has(ql)) return false;
+    if (isBlockedKeyword(q)) return false; // конкурент-бренд/чужой город → не тратим API на заведомо блокируемое
     for (const c of covered) if (c.length > 6 && (ql.includes(c) || c.includes(ql))) return false;
     return true;
   });
@@ -216,11 +250,16 @@ async function main() {
   }
 
   // Мониторинг индексации + авто-переобход ошибок обхода и новых страниц
-  let health = null, indexFix = { recrawled: [] };
+  let health = null, indexFix = { recrawled: [] }, reindex = { submitted: [], unindexedTotal: 0 };
   if (webmasterReady()) {
     try {
       health = await gatherHealth();
-      if (!CONFIG.agent.dryRun) indexFix = await fixIndexation(created.map((u) => CONFIG.siteUrl + u), health);
+      if (!CONFIG.agent.dryRun) {
+        indexFix = await fixIndexation(created.map((u) => CONFIG.siteUrl + u), health);
+        // Постоянный досыл ранее опубликованных, но ещё не проиндексированных страниц.
+        // Бюджет 15/прогон + кулдаун 14 дней бережёт дневную квоту переобхода Вебмастера.
+        reindex = await resubmitUnindexed({ budget: 15, cooldownDays: 14 });
+      }
     } catch (e) { errors.push('health: ' + e.message); }
   }
 
@@ -235,7 +274,10 @@ async function main() {
   const left = queueCount();
   const top = (await popularQueries({ limit: 100 }).catch(() => [])).filter((q) => q.position && q.position <= 30).length;
   const orgVisits = mSources.length ? (mSources.find((s) => /Search engine|Поиск|organic/i.test(s.source))?.visits ?? 0) : null;
-  const codeAlert = cHealth?.codeStatus && cHealth.codeStatus !== 'CS_OK' ? cHealth.codeStatus : '';
+  // CS_ERR_UNKNOWN не считаем поломкой: у сайтов с cookie-консентом (152-ФЗ) Метрика грузится только
+  // после согласия, а проверочный бот Яндекса cookie не принимает → «код не найден», хотя данные идут.
+  // Реальное отсутствие счётчика ловит диагностика Вебмастера (NO_METRIKA_COUNTER), а не этот статус.
+  const codeAlert = cHealth?.codeStatus && cHealth.codeStatus !== 'CS_OK' && cHealth.codeStatus !== 'CS_ERR_UNKNOWN' ? cHealth.codeStatus : '';
   const esc = (arr) => arr.map((s) => '• ' + escapeHtml(s)).join('\n');
   const report = [
     `<b>SEO-агент — прогон завершён</b> (${mins} мин)`,
@@ -248,6 +290,7 @@ async function main() {
     gaps.length ? `📈 Высокий спрос, мы не в топе:\n${esc(gaps.map((g) => `${g.query} — спрос ${g.demand.toFixed(2)}`))}` : '',
     cannib.length ? `⚔️ Каннибализация (общие ключи):\n${esc(cannib.map((c) => `${c.a} ↔ ${c.b}: ${c.shared.slice(0, 2).join(', ')}`))}` : '',
     health ? formatHealth(health, { recrawled: indexFix.recrawled, refreshed }).join('\n') : '',
+    reindex.unindexedTotal ? `♻️ Не в индексе: ${reindex.unindexedTotal}, досланы на переобход: ${reindex.submitted.length}` : '',
     health?.broken?.count ? `🔗 Битые ссылки:\n${esc(describeBrokenLinks(health.broken).map((b) => `${b.from} → ${b.to}`))}` : '',
     left ? `📦 В очереди осталось: ${left}` : 'Очередь пуста',
     skipped.length ? `Пропущено: ${skipped.length}\n${esc(skipped.slice(0, 6))}` : 'Пропущено: 0',
@@ -258,4 +301,14 @@ async function main() {
   try { if (readiness().telegram) await sendMessage(report); } catch (e) { log('telegram:', e.message); }
 }
 
-main().catch((e) => { console.error('[agent] FATAL', e); process.exit(1); });
+main().catch(async (e) => {
+  console.error('[agent] FATAL', e);
+  if (!buildAlerted) {
+    try {
+      if (readiness().telegram) {
+        await sendMessage(`🛑 <b>${escapeHtml(CONFIG.siteName || CONFIG.siteUrl || 'сайт')}: прогон агента упал</b>\n<code>${escapeHtml(String(e?.message || e)).slice(0, 500)}</code>`);
+      }
+    } catch { /* игнор */ }
+  }
+  process.exit(1);
+});

@@ -43,7 +43,7 @@ export async function generateNB2(prompt, { ratio = '16:9', resolution = '2K' } 
     method: 'POST',
     headers: H(),
     body: JSON.stringify({
-      model: 'nano-banana-2',
+      model: process.env.KIE_IMAGE_MODEL || 'nano-banana-2-lite',
       input: { prompt, aspect_ratio: aspect, resolution, output_format: 'png' },
     }),
   });

@@ -37,7 +37,7 @@ export function pagesPublishedToday() {
   try {
     return readFileSync(JOURNAL, 'utf-8').trim().split('\n')
       .map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean)
-      .filter((j) => j.action === 'generate_article' && j.status === 'done' && String(j.ts).slice(0, 10) === day).length;
+      .filter((jj) => jj.action === 'generate_article' && jj.status === 'done' && String(jj.ts).slice(0, 10) === day).length;
   } catch { return 0; }
 }
 

@@ -1,7 +1,6 @@
 // Массовое расширение существующих страниц до ≥1500 слов тела.
 // Фронтматтер сохраняется ДОСЛОВНО, расширяется только тело. Запуск: node scripts/seo-agent/expand-existing.mjs
-import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { ROOT_DIR } from './config.mjs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ask } from './lib/aigate.mjs';
 import { sanitizeMdx } from './lib/generate-post.mjs';
@@ -12,7 +11,7 @@ const MIN = 1500;
 const TARGET = 1850;
 const wc = (b) => b.replace(/[#>*`\-|\[\]()]/g, ' ').split(/\s+/).filter(Boolean).length;
 const split = (mdx) => {
-  const m = mdx.match(/^(---\n[\s\S]*?\n---\n)([\s\S]*)$/);
+  const m = mdx.match(/^(---\r?\n[\s\S]*?\r?\n---\r?\n)([\s\S]*)$/);
   return m ? { fm: m[1], body: m[2] } : { fm: '', body: mdx };
 };
 const titleOf = (fm) => (fm.match(/^title:\s*(.+)$/m)?.[1] || '').replace(/^["']|["']$/g, '').trim();
@@ -30,18 +29,7 @@ const walk = (d) => {
 
 const pool = internalLinkPool();
 const links = pool.map((l) => `- ${l.title}: ${l.url}`).join('\n');
-// Приоритет — очередь тонких из quality-gates (data/enrichment-queue.json): работаем список задач.
-const LIMIT = Number(process.env.EXPAND_LIMIT || 6);
-let files;
-try {
-  const q = JSON.parse(readFileSync(join(ROOT_DIR, 'scripts/seo-agent/data/enrichment-queue.json'), 'utf-8'));
-  if (Array.isArray(q.articles) && q.articles.length) {
-    files = q.articles.map((a) => a.file).filter((f) => { try { return existsSync(f); } catch { return false; } });
-    console.log(`[expand] очередь на обогащение: ${files.length} тонких статей (лимит ${LIMIT}/прогон)`);
-  }
-} catch { /* нет очереди — расширяем всё */ }
-if (!files) files = contentDirs().flatMap(walk);
-files = files.slice(0, LIMIT);
+const files = contentDirs().flatMap(walk);
 
 let expanded = 0, skipped = 0;
 for (const f of files) {
@@ -70,6 +58,13 @@ for (const f of files) {
   const outMdx = sanitizeMdx(fm + (fm && !fm.endsWith('\n') ? '\n' : '') + newBody + '\n');
   const n1 = wc(split(outMdx).body);
   if (n1 < MIN) { console.log(`  ⚠ не добил (${n0}→${n1}), оставляю как есть: ${f.replace(/.*content./, '')}`); continue; }
+  // ГАРД: не перезаписываем оригинал, если после расширения потерян/битый фронтматтер
+  // (иначе Astro-сборка падает InvalidContentEntryDataError и весь сайт не обновляется).
+  const _fm2 = outMdx.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!_fm2 || !/^title:[ \t]*\S/m.test(_fm2[1])) {
+    console.warn(`  ⚠ расширение потеряло фронтматтер — НЕ перезаписываю оригинал: ${f.replace(/.*content./, '')}`);
+    skipped++; continue;
+  }
   writeFileSync(f, outMdx, 'utf-8');
   expanded++;
   console.log(`+ ${n0} → ${n1}: ${f.replace(/.*content./, '')}`);

@@ -61,44 +61,6 @@ export async function yandexSerp(query, { groups = 10 } = {}) {
   return { query, found, results };
 }
 
-/**
- * Google-выдача через xmlstock (ОПТ-ИН, для инъязычных/Google-целей). Яндекс остаётся дефолтом —
- * эту функцию вызывает только код в Google-режиме. Тот же парсер <doc>, другой эндпоинт и параметры.
- *   hl/gl — язык/страна выдачи (ru/RU по умолчанию; для инъязычного сайта задать, напр., en/US).
- * Возвращает { query, found, results:[{url, domain, title}], engine:'google' }.
- */
-export async function googleSerp(query, { num = 10, hl = 'ru', gl = 'RU', domain = 'google.com' } = {}) {
-  assertKeys();
-  logCall('xmlstock');
-  const url =
-    `https://xmlstock.com/google/xml/?user=${user}&key=${key}` +
-    `&query=${encodeURIComponent(query)}&hl=${hl}&gl=${gl}&domain=${encodeURIComponent(domain)}&num=${num}`;
-  const xml = await fetchText(url);
-
-  const foundRaw = tag(xml, 'found');
-  const found = foundRaw ? Number(stripCdata(foundRaw).replace(/\D/g, '')) : null;
-
-  const docs = tagAll(xml, 'doc');
-  const results = docs.map((d) => {
-    const u = stripCdata(tag(d, 'url') || '');
-    let dom = '';
-    try { dom = new URL(u).hostname.replace(/^www\./, ''); } catch {}
-    return { url: u, domain: dom, title: stripCdata(tag(d, 'title') || '') };
-  });
-
-  const errCode = tag(xml, 'error');
-  if (errCode && results.length === 0) throw new Error(`xmlstock google error: ${stripCdata(errCode)}`);
-  return { query, found, results, engine: 'google' };
-}
-
-/**
- * Единая точка: выдача под нужный движок. По умолчанию 'yandex' (основа агента).
- * 'google' — только если вызвано с явным engine (пользователь включил Google-канал).
- */
-export async function serp(query, { engine = 'yandex', ...opts } = {}) {
-  return engine === 'google' ? googleSerp(query, opts) : yandexSerp(query, opts);
-}
-
 /** Грубая оценка «лёгкости» ключа: чем меньше found и больше агрегаторов/маркетплейсов в топе — тем легче. */
 export function scoreOpportunity({ found, results }) {
   const AGG = ['avito.ru', 'youla.ru', 'profi.ru', 'yandex.ru', 'vk.com', 'zen.yandex.ru', 'dzen.ru', 'ozon.ru', 'wildberries.ru'];

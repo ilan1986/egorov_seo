@@ -81,6 +81,21 @@ export async function queryAnalytics({ limit = 500 } = {}) {
   }
 }
 
+/**
+ * Запросы с высоким рыночным спросом (DEMAND), по которым у сайта 0 кликов → кандидаты на НОВЫЕ
+ * страницы. DEMAND — спрос независимо от текущей видимости сайта (в отличие от показов, которые
+ * требуют, чтобы сайт уже где-то показывался). Возвращает топ по спросу.
+ * Живёт здесь (а не в ctr-optimize.mjs), чтобы demand-аналитика была доступна и в daily-report,
+ * и на сайтах, у которых свой bespoke ctr-optimize (vradok) вне fanout ядра.
+ */
+export async function demandGaps({ minDemand = 1, limit = 500, top = 8 } = {}) {
+  const rows = await queryAnalytics({ limit });
+  return rows
+    .filter((r) => r.demand >= minDemand && r.clicks === 0)
+    .sort((a, b) => b.demand - a.demand || b.impressions - a.impressions)
+    .slice(0, top);
+}
+
 /** Сводка по сайту: ИКС (SQI), страниц в поиске/исключено, счётчики проблем. */
 export async function summary() {
   if (!webmasterReady()) return null;

@@ -2,6 +2,11 @@
 // Основной провайдер картинок ядра (см. images.mjs) — kie.ai остаётся резервом на случай
 // перегрузки/недоступности бесплатного сервиса (без SLA).
 const BASE = 'https://image.pollinations.ai/prompt';
+// Токен pollinations (POLLINATIONS_TOKEN в .env) шлём заголовком Authorization. На бесплатном тарифе
+// лимит = 1 одновременный запрос на IP → при залпе кронов с одного VPS сыпется 429. Токен + ретрай
+// ниже пережидают очередь; безлимит — только платный enter.pollinations.ai.
+const TOKEN = (process.env.POLLINATIONS_TOKEN || '').trim();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const RATIO_SIZE = {
   '1:1': [1200, 1200],
@@ -26,9 +31,18 @@ export function pollinationsUrl(prompt, { ratio = '16:9', width, height, seed = 
   return `${BASE}/${encoded}?width=${w}&height=${h}&model=flux&nologo=true&seed=${seed}`;
 }
 
-/** Проверить, что URL реально отдаёт картинку (сервис публичный, без SLA — иногда 500/перегружен). */
+/** Проверить, что URL реально отдаёт картинку. Ретрай с бэкоффом на 429 (очередь IP занята другим
+ * кроном) и 5xx — пережидаем, пока освободится 1 слот, вместо мгновенного падения в платный kie. */
 export async function pollinationsCheck(url) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) });
-  if (!res.ok) throw new Error(`pollinations HTTP ${res.status}`);
-  return url;
+  const headers = TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {};
+  let lastErr;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(60_000) });
+      if (res.ok) return url;
+      if (res.status === 429 || res.status >= 500) { lastErr = new Error(`pollinations HTTP ${res.status}`); await sleep(9000 + attempt * 8000); continue; }
+      throw new Error(`pollinations HTTP ${res.status}`);
+    } catch (e) { lastErr = e; await sleep(7000 + attempt * 7000); }
+  }
+  throw lastErr || new Error('pollinations: не удалось после ретраев');
 }

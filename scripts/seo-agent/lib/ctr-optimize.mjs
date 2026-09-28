@@ -1,8 +1,13 @@
 // CTR-оптимизатор (шаг 6 воркфлоу): страницы с показами, но без кликов →
 // переписываем seoTitle/description под реальные запросы Яндекса, чтобы поднять кликабельность.
-import { queryAnalytics } from './webmaster.mjs';
+import { queryAnalytics, demandGaps } from './webmaster.mjs';
 import { fileForUrl, readMeta, updateMeta, urlPath } from './content.mjs';
 import { ask } from './aigate.mjs';
+
+// demandGaps переехал в webmaster.mjs (нужен и в daily-report, и на vradok, где свой ctr-optimize
+// вне fanout). Ре-экспорт — чтобы старые импорты `import { demandGaps } from './ctr-optimize.mjs'`
+// (напр. в run.mjs ядра) продолжали работать.
+export { demandGaps };
 
 const clip = (s, n) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n).replace(/[\s,;:–—-]+$/, '');
 
@@ -33,18 +38,6 @@ export async function ctrCandidates({ minImpr = 5, maxCtr = 0.005, limit = 500 }
   return pages
     .filter((p) => p.impressions >= minImpr && p.impressions * maxCtr >= p.clicks)
     .sort((a, b) => b.impressions - a.impressions);
-}
-
-/**
- * Запросы с высоким спросом, по которым нас нет среди кликов/показов на наших страницах →
- * кандидаты на НОВЫЕ страницы. Возвращает топ по DEMAND.
- */
-export async function demandGaps({ minDemand = 1, limit = 500, top = 8 } = {}) {
-  const rows = await queryAnalytics({ limit });
-  const gaps = rows
-    .filter((r) => r.demand >= minDemand && r.clicks === 0)
-    .sort((a, b) => b.demand - a.demand || b.impressions - a.impressions);
-  return gaps.slice(0, top);
 }
 
 const SYS =

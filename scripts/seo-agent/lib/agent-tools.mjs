@@ -46,6 +46,7 @@ export const TOOLS = {
     risk: 'auto', cap: null, desc: 'Проверить SEO-drift (не потерялись ли schema/canonical/страницы после деплоя).',
     run: () => sh(`node -e "import('./scripts/seo-agent/lib/drift.mjs').then(m=>console.log(m.driftReportLine(m.runDrift())))"`),
   },
+
   aeo_check: {
     risk: 'auto', cap: null, desc: 'AEO-аудит: цитируемость нейросетями (доступ AI-ботам, schema+автор, FAQ, свежесть, llms.txt) + список, что добить.',
     run: () => sh(`node -e "import('./scripts/seo-agent/lib/aeo.mjs').then(async m=>{const r=await m.aeoAudit();console.log(m.aeoLine(r));console.log(JSON.stringify(r.checks))})"`),

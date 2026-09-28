@@ -71,7 +71,7 @@ async function main() {
 
   const msg = [
     '📊 <b>Позиции в Яндексе — недельная сводка</b>',
-    `${(CONFIG.siteUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, '') || 'сайт'}`,
+    String(CONFIG.siteUrl || '').replace(/^https?:\/\//, '').replace(/\/$/, ''),
     '',
     `В топ-100: <b>${top100.length}</b> · топ-30: ${inTop(30)} · топ-10: ${inTop(10)} · топ-3: ${inTop(3)}`,
     `Показы: ${totalShows} · клики: ${totalClicks}`,

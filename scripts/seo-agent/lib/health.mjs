@@ -11,11 +11,12 @@ import {
   externalLinksCount, diagnostics, popularQueries, queryAnalytics, recrawl,
 } from './webmaster.mjs';
 import { existingPages, fileForUrl, urlPath } from './content.mjs';
-import { ROOT_DIR } from '../config.mjs';
+import { ROOT_DIR, CONFIG, DEFAULT_HEADERS } from '../config.mjs';
 import { ask } from './aigate.mjs';
 
 const DATA_DIR = join(ROOT_DIR, 'scripts/seo-agent/data');
 const REFRESH_LOG = join(DATA_DIR, 'refreshed.json');
+const RECRAWL_LOG = join(DATA_DIR, 'recrawl-submitted.json'); // {url: ISO} — когда URL последний раз слали в переобход
 const today = () => new Date().toISOString().slice(0, 10);
 
 const DIAG_LABELS = {
@@ -34,6 +35,12 @@ const DIAG_LABELS = {
   TOO_MANY_DOMAINS_ON_SEARCH: 'Много поддоменов в поиске',
 };
 export const diagLabel = (k) => DIAG_LABELS[k] || k;
+
+// Диагностики Вебмастера, которые НЕ выносим в отчёт как проблему: favicon-семейство —
+// SERP-косметика. Если на сайте реально отдаётся файл фавикона, статус снимается на
+// переобходе Яндекса (пока лагает — это шум в отчёте, а не дефект). Реальные ошибки
+// (4xx/5xx, robots, sitemap, DNS, угрозы) остаются.
+const DIAG_IGNORE = new Set(['FAVICON_ERROR', 'BIG_FAVICON_ABSENT', 'FAVICON_PROBLEM']);
 
 // ── Сбор данных мониторинга ──────────────────────────
 export async function gatherHealth() {
@@ -65,6 +72,90 @@ export async function fixIndexation(createdUrls = [], health = null) {
     }
   }
   return { recrawled, crawlErrors: h.crawlErrors };
+}
+
+// ── Досыл непроиндексированных страниц в переобход (постоянный) ──
+// Для молодого сайта Яндекс индексирует медленно: опубликовано много, а в поиске единицы.
+// fixIndexation() шлёт только свежие/битые; эта функция добирает ВСЕ уже опубликованные
+// страницы, которых ещё нет в поиске, порциями с кулдауном — чтобы не выжигать дневную квоту
+// переобхода и не долбить один и тот же URL каждую ночь (Яндекс от спама быстрее не индексирует).
+function loadRecrawlLog() {
+  if (!existsSync(RECRAWL_LOG)) return {};
+  try { return JSON.parse(readFileSync(RECRAWL_LOG, 'utf-8')); } catch { return {}; }
+}
+function saveRecrawlLog(o) {
+  try { writeFileSync(RECRAWL_LOG, JSON.stringify(o, null, 2), 'utf-8'); } catch {}
+}
+
+// Полный список URL сайта из sitemap (карта — источник истины: включает и статьи, и
+// карточки каталога/районы/застройщиков, которых нет в existingPages). Fallback — existingPages.
+async function allSiteUrls() {
+  const base = CONFIG.siteUrl.replace(/\/$/, '');
+  const fetchXml = async (u) => {
+    try {
+      const r = await fetch(u, { headers: DEFAULT_HEADERS, signal: AbortSignal.timeout(20_000) });
+      return r.ok ? await r.text() : '';
+    } catch { return ''; }
+  };
+  const locs = (xml) => [...xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)].map((m) => m[1]);
+  try {
+    // пробуем sitemap-index и обычный sitemap
+    let idx = await fetchXml(`${base}/sitemap-index.xml`);
+    if (!idx) idx = await fetchXml(`${base}/sitemap.xml`);
+    if (!idx) return existingPages().map((p) => base + p.url);
+    const inner = locs(idx);
+    // если это индекс (ссылки на другие sitemap-*.xml) — собираем из них
+    const subs = inner.filter((u) => /sitemap.*\.xml$/i.test(u));
+    if (subs.length) {
+      const all = [];
+      for (const s of subs) all.push(...locs(await fetchXml(s)));
+      return [...new Set(all)];
+    }
+    return [...new Set(inner)]; // это уже обычный sitemap с URL страниц
+  } catch {
+    return existingPages().map((p) => base + p.url);
+  }
+}
+
+/**
+ * @param {object} opts
+ * @param {number} opts.budget   сколько URL максимум досылать за прогон (беречь дневную квоту ~150)
+ * @param {number} opts.cooldownDays  не слать тот же URL чаще, чем раз в N дней
+ */
+export async function resubmitUnindexed({ budget = 15, cooldownDays = 14 } = {}) {
+  const urls = await allSiteUrls();
+  const pages = urls.map((u) => ({ url: u }));
+  if (!pages.length) return { submitted: [], unindexedTotal: 0 };
+
+  // Страницы, которые Вебмастер уже показывает в поиске (best-effort: endpoint отдаёт образцы).
+  const inSearch = await inSearchSamples({ limit: 2000 }).catch(() => []);
+  const indexedPaths = new Set(inSearch.map((s) => urlPath(s.url)));
+
+  const log = loadRecrawlLog();
+  const now = Date.now();
+  const cooldownMs = cooldownDays * 864e5;
+
+  // непроиндексированные + не в кулдауне, самые «старые по досылу» первыми
+  const candidates = pages
+    .map((p) => ({ url: p.url, path: urlPath(p.url) }))
+    .filter((p) => !indexedPaths.has(p.path))
+    .filter((p) => {
+      const last = log[p.path];
+      return !last || now - Date.parse(last) > cooldownMs;
+    })
+    .sort((a, b) => (Date.parse(log[a.path] || 0)) - (Date.parse(log[b.path] || 0)));
+
+  const unindexedTotal = pages.filter((p) => !indexedPaths.has(urlPath(p.url))).length;
+  const submitted = [];
+  for (const c of candidates.slice(0, budget)) {
+    const abs = c.url.startsWith('http') ? c.url : CONFIG.siteUrl + c.url;
+    if (await recrawl(abs)) {
+      log[c.path] = new Date().toISOString();
+      submitted.push(c.path);
+    }
+  }
+  if (submitted.length) saveRecrawlLog(log);
+  return { submitted, unindexedTotal };
 }
 
 // ── Битые внутренние ссылки: отчёт + безопасный фикс ──
@@ -178,7 +269,7 @@ export function formatHealth(h, extra = {}) {
   if (h.crawlErrors?.length) lines.push(`🧨 ошибки обхода (4xx/5xx): ${h.crawlErrors.length}`);
   if (h.broken?.count) lines.push(`🔗 битых внутренних ссылок: ${h.broken.count}`);
   if (typeof h.extCount === 'number' && h.extCount > 0) lines.push(`🌐 внешних ссылок: ${h.extCount}`);
-  const active = (h.diag || []).filter((d) => d.severity !== 'RECOMMENDATION' || d.key.includes('4XX') || d.key.includes('5XX'));
+  const active = (h.diag || []).filter((d) => !DIAG_IGNORE.has(d.key) && (d.severity !== 'RECOMMENDATION' || d.key.includes('4XX') || d.key.includes('5XX')));
   if (active.length) lines.push('🩺 ' + active.map((d) => diagLabel(d.key)).join(', '));
   if (extra.recrawled?.length) lines.push(`♻️ на переобход: ${extra.recrawled.length}`);
   if (extra.refreshed?.length) lines.push('🔄 обновлены (рефреш): ' + extra.refreshed.map((r) => r.query).join('; '));

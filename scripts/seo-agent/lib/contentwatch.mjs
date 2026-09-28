@@ -10,13 +10,19 @@ export const contentwatchReady = () => Boolean(key);
 
 async function call(params, { retries = 3 } = {}) {
   for (let i = 0; i <= retries; i++) {
-    const res = await fetch(API, {
-      method: 'POST',
-      headers: { ...DEFAULT_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(params),
-      signal: AbortSignal.timeout(30_000),
-    });
-    const txt = await res.text();
+    let res, txt;
+    try {
+      res = await fetch(API, {
+        method: 'POST',
+        headers: { ...DEFAULT_HEADERS, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(params),
+        signal: AbortSignal.timeout(60_000),
+      });
+      txt = await res.text();
+    } catch (e) {
+      if (i < retries) { await sleep(6000); continue; } // таймаут/сеть — ещё попытка
+      throw e;
+    }
     let data;
     try { data = JSON.parse(txt); } catch { throw new Error(`content-watch: не JSON: ${txt.slice(0, 150)}`); }
     // временные ошибки (лимит потоков/подождите) — ждём и повторяем

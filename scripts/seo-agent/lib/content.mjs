@@ -35,7 +35,7 @@ export function queueCount() {
   return queueList().length;
 }
 export function queuedSlugs() {
-  return queueList().map((p) => p.replace(/.*[\\/]q-\d+-/, '').replace(/\.mdx?$/, ''));
+  return queueList().map((p) => p.replace(/.*[\\/]q-(?:[a-z]+-)?\d+-/, '').replace(/\.mdx?$/, '')); // q-ch-<id>- тоже
 }
 
 function listMdx(dir, base, type) {

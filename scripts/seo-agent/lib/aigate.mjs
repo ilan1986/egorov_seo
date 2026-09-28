@@ -1,7 +1,7 @@
 // LLM-клиент с мультипровайдерным фолбэком (OpenAI-совместимый).
-// Основной провайдер — closerouter; при сбое (502/timeout/пустой ответ) клиент по кругу
-// пробует резервы anymodel → wellflow. Порядок и ключи — в config.mjs / .env.
-// (сервис aigate выведен из цепочки — больше не используется.)
+// Порядок провайдеров и ключи — в config.mjs / .env. Если задан локальный llm-proxy (AIGATE_BASE_URL),
+// он идёт основным (свой устойчивый фолбэк + localhost-скорость), иначе основной — closerouter;
+// при сбое (502/timeout/пустой ответ) клиент по кругу пробует резервы closerouter → anymodel → wellflow.
 import { CONFIG, DEFAULT_HEADERS } from '../config.mjs';
 import { logCostUsd } from './cost-ledger.mjs';
 
@@ -36,7 +36,12 @@ async function callProvider(p, { messages, temperature, maxTokens, tier, timeout
  * opts.tier: 'generation' (по умолч., Sonnet-класс) | 'dialog' (дешевле, для бота).
  * costCategory — тег для дневного отчёта расходов (cost_usd отдаёт только часть провайдеров).
  */
-export async function chat(messages, { temperature = 0.7, maxTokens = 4096, tier, modelOverride, timeoutMs = 120_000, costCategory = 'generation' } = {}) {
+// Таймаут одного запроса. Провайдеры отвечают с огромным разбросом (замер на боевом сервере:
+// 400 токенов — то 8 с, то 35 с), и статья на 1800+ слов в 200 с не всегда укладывается —
+// запрос рвётся, материал теряется. Держим в .env, чтобы поднимать без правки ядра.
+const DEFAULT_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || 200_000);
+
+export async function chat(messages, { temperature = 0.7, maxTokens = 4096, tier, modelOverride, timeoutMs = DEFAULT_TIMEOUT_MS, costCategory = 'generation' } = {}) {
   const usable = PROVIDERS.filter((p) => p && p.key);
   if (!usable.length) throw new Error('LLM: ни один провайдер не настроен (нет ключей)');
   // modelOverride оставлен для обратной совместимости: раньше им передавали dialog-модель aigate.

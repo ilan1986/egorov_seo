@@ -11,6 +11,7 @@ import { probeCapabilities } from './lib/capabilities.mjs';
 import { goals, dailyBudgetUsd, dailyPageTarget, pagesPublishedToday, budgetBonusToday, addBudgetBonus, recentJournal, logDecision, runningExperiments, pendingProposals } from './lib/agent-journal.mjs';
 import { metrikaReady, metrikaToday } from './lib/metrika.mjs';
 import { webmasterReady, demandGaps } from './lib/webmaster.mjs';
+import { isBlockedKeyword } from './lib/blocklist.mjs';
 import { gscReady, gscDemandGaps, gscTotals } from './lib/gsc.mjs'; // Google — ОПТ-ИН: молчит, пока нет кред
 import { seoInsights } from './lib/insights.mjs'; // striking-distance / просадки / битые ссылки
 
@@ -18,6 +19,8 @@ const DRY = process.env.AGENT_DRY === '1'; // режим наблюдения: �
 
 const DATA = join(ROOT_DIR, 'scripts/seo-agent/data');
 const readJson = (p, d) => { try { return JSON.parse(readFileSync(join(DATA, p), 'utf-8')); } catch { return d; } };
+const EXCLUDE_TOPICS = (() => { try { const a = readJson('topic-exclude.json', []); return (Array.isArray(a) ? a : []).map((s) => { try { return new RegExp(s, 'i'); } catch { return null; } }).filter(Boolean); } catch { return []; } })();
+const isExcludedTopic = (q) => !q || isBlockedKeyword(q) || EXCLUDE_TOPICS.some((re) => re.test(q));
 
 function todaySpendUsd() {
   const day = new Date().toISOString().slice(0, 10);
@@ -30,6 +33,10 @@ async function perceive() {
   const st = readJson('report-state.json', {});
   const pos = st.positions || {};
   const arr = Object.entries(pos).map(([q, p]) => ({ q, p: Math.round(Number(p) * 10) / 10 })).filter((x) => Number.isFinite(x.p)).sort((a, b) => a.p - b.p);
+  // ПРАВИЛО: запрос уже в топ-10 → цель достигнута, НЕ генерируем/не расширяем под него (иначе трата бюджета на удержание).
+  const normQ = (s) => (s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9 ]+/gi, ' ').replace(/\s+/g, ' ').trim();
+  const top10Set = new Set(arr.filter((x) => x.p <= 10).map((x) => normQ(x.q)));
+  const inTop10 = (q) => top10Set.has(normQ(q));
   const sov = readJson('ai-sov.json', {}).latest || null;
   const brand = readJson('brand-authority.json', {}).latest || null;
   const spent = todaySpendUsd();
@@ -37,11 +44,21 @@ async function perceive() {
   // Живые сигналы (guarded — если не настроено, тихо пропускаем)
   let traffic = null, demand = null;
   if (metrikaReady()) { try { const m = await metrikaToday(); traffic = { visits: m.visits ?? m.visitors ?? null, pageviews: m.pageviews ?? null }; } catch {} }
-  if (webmasterReady()) { try { demand = (await demandGaps({ top: 8 })).map((d) => ({ q: d.query, demand: d.demand })); } catch {} }
+  // Спрос: keys.so (data/keyso-demand.json — реальные запросы под спрос) вместо Webmaster demandGaps (пустой хвост).
+  // Конкурент-бренды и чужие города режем блок-листом (isBlockedKeyword). Каждый сайт производит keyso-demand.json по-своему.
+  {
+    const kd = readJson('keyso-demand.json', null);
+    const items = kd && Array.isArray(kd.items) ? kd.items : [];
+    const seen = new Set();
+    const clean = items.filter((i) => i.query && !isExcludedTopic(i.query) && !inTop10(i.query) && !seen.has(i.query.toLowerCase()) && (seen.add(i.query.toLowerCase()) || true));
+    if (clean.length) demand = clean.map((i) => ({ q: i.query, demand: i.demand })).sort((a, b) => b.demand - a.demand).slice(0, 40);
+  }
+  if (!demand && webmasterReady()) { try { demand = (await demandGaps({ top: 8 })).map((d) => ({ q: d.query, demand: d.demand })).filter((d) => !isExcludedTopic(d.q) && !inTop10(d.q)); } catch {} }
 
   // SEO-инсайты (NeAhrefs-lite): striking-distance, просадки позиций, битые ссылки — на них агент действует.
   let insights = null;
   if (webmasterReady()) { try { insights = await seoInsights(pos); } catch {} }
+  if (insights && Array.isArray(insights.striking_distance)) insights.striking_distance = insights.striking_distance.filter((s) => !isExcludedTopic(s.query) && !inTop10(s.query));
 
   // Google-канал — ОПТ-ИН: сигнал появляется ТОЛЬКО когда заданы GSC-креды. По умолчанию Яндекс.
   let google = null;
@@ -78,7 +95,9 @@ const REASON_SYS =
   'ДНЕВНОЙ ПЛАН: если в состоянии задан page_target и pages_left>0 — ПРИОРИТЕТ №1: generate_article, ' +
   'добивай план новых страниц, пока pages_left>0; только ПОСЛЕ выполнения плана переходи к поддержке ' +
   '(rewrite_ctr/refresh_stale/expand_thin/ai_probe). Если бюджет кончится раньше плана — stop (человек решит про бюджет). ' +
-  'СИГНАЛЫ insights (быстрые точки роста, приоритетнее случайных тем): striking_distance (запрос на поз.3–20 с высоким спросом — «один пуш = топ-3») → generate_article с этим query ИЛИ refresh_stale/expand_thin страницы под него; position_drops (позиция просела) → refresh_stale/rewrite_ctr по этим запросам в первую очередь; content_decay (теряет показы) → refresh_stale страницы, пока не поздно; crawl_health.problems или broken_links>0 → drift_check или предложи фикс через approve. ' +
+  'ПРАВИЛО ТОП-10: если запрос УЖЕ в топ-10 — цель достигнута, НЕ пиши и НЕ расширяй под него статью (это удержание, трата бюджета). Двигайся к запросам ВНЕ топ-10 (striking 11-20) ИЛИ бери НОВЫЕ темы из demand_gaps (банк keys.so), по которым у сайта ещё НЕТ страницы. ' +
+  'СИГНАЛЫ insights (быстрые точки роста, приоритетнее случайных тем): striking_distance (запрос на поз.11–20, ещё НЕ в топ-10, — «один пуш = топ-3») → generate_article с этим query ИЛИ refresh_stale/expand_thin страницы под него; position_drops (позиция просела) → refresh_stale/rewrite_ctr по этим запросам в первую очередь; content_decay (теряет показы) → refresh_stale страницы, пока не поздно; crawl_health.problems или broken_links>0 → drift_check или предложи фикс через approve. ' +
+
   'Отвечай СТРОГО JSON: {"thought":"...", "action":"<имя из каталога|stop>", "args":{...}, "why":"обоснование по данным"}. ' +
   'action:"stop" если ценных действий в бюджете не осталось.';
 
