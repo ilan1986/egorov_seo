@@ -22,9 +22,17 @@ Telegram. Работает в двух режимах: **свои сайты** �
 
 **Контент и семантика**
 - Реальная частотность и SERP (Wordstat/Arsenkin/XML) — без выдуманных ключей.
+- **keys.so** (опт-ин): striking-distance (частотные запросы на позициях 11–30 → дожать), органические
+  и Директ-конкуренты + их рекламные ключи (ядро для нейро-директолога).
 - Генерация с фактчеком, проверкой уникальности и **quality-gate** (promptfoo): блокирует воду/клише
-  и тонкий контент до публикации.
+  и тонкий контент до публикации; blocklist не даёт писать про конкурентов.
 - Кластеризация, content-brief, перелинковка, авторские/Article/FAQ/Person schema.
+
+**Публикация**
+- Astro → сборка → FTP/SSH на хостинг (по умолчанию), либо напрямую в **Joomla 4/5 через REST API** —
+  цель выбирается в `site.profile.mjs`.
+- Картинки: Pollinations (бесплатно) → kie.ai Nano Banana 2 (резерв), с проходом через локальный
+  llm-proxy при его наличии; переиндексация через IndexNow + Яндекс.Вебмастер.
 
 **GEO (оптимизация под ответы нейросетей)**
 - Citability-скоринг, `llms.txt`, GEO-директивы, E-E-A-T, свежесть.
@@ -51,12 +59,16 @@ scripts/seo-agent/
   onboard.mjs                # первый запуск: режим + зонд возможностей + план
   run.mjs                    # линейный конвейер генерации/оптимизации/публикации
   ai-citation-probe.mjs      # AI Share of Voice (Perplexity Sonar)
+  generate-one.mjs           # разовая генерация одной статьи по ключу
+  test-joomla.mjs            # проверка соединения с Joomla REST
   lib/                        # capabilities, agent-tools, decide-aisdk, agent-journal,
                               # citability, geo-score, drift, charts, logaudit, deepcrawl,
+                              # keysso (keys.so), publish/publish-joomla, blocklist,
                               # quality-gate, client-audit/report, proposal, prospect, ...
   quality/                    # promptfoo quality-gate
-  templates/                  # site.profile.example, robots.geo, политика/cookie/consent,
-                              # blocks/ (Astro-секции), *-proxy.php (first-party)
+scripts/images/               # images (диспетчер), pollinations, kie-nb2, proxy-image
+scripts/bot/                  # telegram-бот согласований + site-state
+scripts/templates/            # robots.geo, политика/cookie/consent, lead.php (форвардер заявок)
 ```
 
 ## Быстрый старт
@@ -76,6 +88,7 @@ scripts/seo-agent/
 
 ---
 
-Стек: Node.js (ESM), Astro-сайты, aigate (OpenAI-совместимый шлюз), Yandex Webmaster/Metrika,
-Wordstat/Arsenkin/XML, Perplexity Sonar, Crawlee/Playwright, promptfoo, ECharts, gotenberg,
-Umami, GrowthBook, Telegram Bot API.
+Стек: Node.js (ESM), Astro/Joomla-сайты, LLM через локальный llm-proxy + OpenAI-совместимые шлюзы
+(closerouter/anymodel/wellflow, перебор по кругу при сбое), Yandex Webmaster/Metrika,
+Wordstat/Arsenkin/XML/keys.so, Perplexity Sonar, Pollinations/kie.ai, Crawlee/Playwright, promptfoo,
+ECharts, gotenberg, Umami, GrowthBook, Telegram Bot API.
