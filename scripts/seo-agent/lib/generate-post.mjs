@@ -371,7 +371,30 @@ export function repairFrontmatterFaq(mdx) {
   // LLM иногда пишет ответ как ЭЛЕМЕНТ списка «- a:» вместо ключа мэппинга «a:» → рвёт YAML faq
   // («end of the stream», InvalidContentEntry). Убираем лишний дефис перед a:.
   fixed = fixed.replace(/^(\s*)-[ \t]+a:/gm, '$1a:');
+  fixed = fixInnerQuotes(fixed);
   return mdx.replace(m[0], m[1] + fixed + m[3]);
+}
+
+// LLM иногда оставляет неэкранированные " внутри значения в двойных кавычках (`a: "…полностью "замораживают" …"`)
+// → YAML обрывает строку (js-yaml «bad indentation of a mapping entry»), сборка падает. Внутренние кавычки
+// превращаем в «ёлочки» (парами), при нечётном числе — экранируем. Только text-ключи, идемпотентно.
+const FM_TEXT_KEYS = new Set(['title', 'description', 'h1', 'alt', 'seotitle', 'caption', 'ogtitle', 'q', 'a', 'question', 'answer', 'name', 'text', 'lead', 'tldr']);
+function fixInnerQuotes(fm) {
+  const BS = String.fromCharCode(92);
+  return fm.split(/\r?\n/).map((ln) => {
+    const km = ln.match(/^(\s*(?:-\s+)?)([A-Za-z0-9_]+):[ \t]+"(.*)"[ \t]*$/);
+    if (!km || !FM_TEXT_KEYS.has(km[2].toLowerCase())) return ln;
+    const inner = km[3], pos = [];
+    for (let i = 0; i < inner.length; i++) {
+      if (inner[i] === BS) { i++; continue; }
+      if (inner[i] === '"') pos.push(i);
+    }
+    if (!pos.length) return ln;
+    const even = pos.length % 2 === 0;
+    let out = '', last = 0;
+    pos.forEach((p, k) => { out += inner.slice(last, p) + (even ? (k % 2 === 0 ? '«' : '»') : BS + '"'); last = p + 1; });
+    return `${km[1]}${km[2]}: "${out + inner.slice(last)}"`;
+  }).join('\n');
 }
 
 // keywords/tags модель иногда отдаёт СТРОКОЙ «a, b, c», а Zod-схема ждёт массив → сборка падает
