@@ -18,8 +18,16 @@ const QUERIES = (process.env.COVER_QUERIES ||
 // теги, при которых фото не берём (нужны только здания и сооружения, без людей и «посторонних» сюжетов)
 const BAD_TAGS = /\b(woman|women|man|men|girl|boy|child|children|kid|people|person|portrait|wedding|bride|groom|model|baby|couple|family|nude|bikini|dog|cat|food|flower|flowers)\b/i;
 // нужны ТОЛЬКО современные многоквартирные дома, жилые комплексы и стройки: берём фото, у которых есть «жилые» теги, и отсекаем старину/туризм/монохром
-const GOOD_TAGS = /(apartment|residential|high.?rise|housing|condominium|multi.?storey|multi.?story|skyscraper|construction|crane|new building|block of flats|flats|tower block|modern architecture|modern building)/i;
-const EXCLUDE_TAGS = /\b(?:old town|medieval|historic|history|castle|church|cathedral|temple|mosque|palace|ruin|abandoned|rooftops?|roofs?|tourism|tourist|sightseeing|paris|italy|france|spain|croatia|dubrovnik|venice|prague|black and white|monochrome|sepia|vintage|retro|interior|room|bedroom|kitchen|furniture|street art|graffiti|bridge|cars?|boat|ship|snow|winter|beach|sea|ocean|coast|island|lake|mountains?|mediterranean|texture|pattern|abstract|minimalist|minimal|details?|walls?|windows?|balcon(?:y|ies)|stairs|staircase|doors?|ancient|old|shutters|sold|sale|signs?|houses?|homes?|villa|cottage|pool|swimming)\b/i;
+const HOUSING_GOOD = /(apartment|residential|high.?rise|housing|condominium|multi.?storey|multi.?story|skyscraper|construction|crane|new building|block of flats|flats|tower block|modern architecture|modern building)/i;
+const HOUSING_EXCLUDE = /\b(?:old town|medieval|historic|history|castle|church|cathedral|temple|mosque|palace|ruin|abandoned|rooftops?|roofs?|tourism|tourist|sightseeing|paris|italy|france|spain|croatia|dubrovnik|venice|prague|black and white|monochrome|sepia|vintage|retro|interior|room|bedroom|kitchen|furniture|street art|graffiti|bridge|cars?|boat|ship|snow|winter|beach|sea|ocean|coast|island|lake|mountains?|mediterranean|texture|pattern|abstract|minimalist|minimal|details?|walls?|windows?|balcon(?:y|ies)|stairs|staircase|doors?|ancient|old|shutters|sold|sale|signs?|houses?|homes?|villa|cottage|pool|swimming)\b/i;
+// Профиль под другую нишу: COVER_CATEGORY (категория Pixabay; 'any' = без категории), COVER_GOOD_TAGS / COVER_EXCLUDE_TAGS / COVER_BAD_TAGS — regexp-строки.
+// Без COVER_CATEGORY действует профиль «жилые дома» (категория buildings + фильтры выше).
+const CATEGORY = process.env.COVER_CATEGORY === undefined ? 'buildings' : process.env.COVER_CATEGORY.trim();
+const rx = (v, d, whole) => (v ? new RegExp(whole ? '\\b(?:' + v + ')\\b' : v, 'i') : d); // whole: слова целиком (EXCLUDE/BAD), иначе «sign» ловит «design»
+const GENERIC_EXCLUDE = /(?:nude|bikini|sepia|black and white|monochrome|logo|text|sign|signs|advertising)/i;
+const GOOD_TAGS = rx(process.env.COVER_GOOD_TAGS, process.env.COVER_CATEGORY === undefined ? HOUSING_GOOD : null);
+const EXCLUDE_TAGS = rx(process.env.COVER_EXCLUDE_TAGS, process.env.COVER_CATEGORY === undefined ? HOUSING_EXCLUDE : GENERIC_EXCLUDE, true);
+const BAD = rx(process.env.COVER_BAD_TAGS, BAD_TAGS, true);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (s) => createHash('sha1').update(s).digest('hex');
 const hashNum = (s) => parseInt(sha(s).slice(0, 8), 16);
@@ -32,9 +40,9 @@ function apiKey() {
 
 async function search(query, page) {
   mkdirSync(CACHE_DIR, { recursive: true });
-  const cf = `${CACHE_DIR}/${sha(query + '|' + page)}.json`;
+  const cf = `${CACHE_DIR}/${sha(query + '|' + page + '|' + CATEGORY)}.json`;
   try { if (Date.now() - statSync(cf).mtimeMs < CACHE_MS) return JSON.parse(readFileSync(cf, 'utf8')); } catch { /* кэша нет */ }
-  const url = `https://pixabay.com/api/?key=${encodeURIComponent(apiKey())}&q=${encodeURIComponent(query)}&image_type=photo&category=buildings&orientation=horizontal&min_width=1280&safesearch=true&order=popular&per_page=200&page=${page}`;
+  const url = `https://pixabay.com/api/?key=${encodeURIComponent(apiKey())}&q=${encodeURIComponent(query)}&image_type=photo&${CATEGORY && CATEGORY !== 'any' ? 'category=' + CATEGORY + '&' : ''}orientation=horizontal&min_width=1280&safesearch=true&order=popular&per_page=200&page=${page}`;
   for (let attempt = 0; attempt < 3; attempt++) {
     const r = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if (r.status === 429) { await sleep(20_000 + attempt * 20_000); continue; } // лимит 100/мин
@@ -60,7 +68,7 @@ export async function pixabayCover({ name, width = 1200, height, format = 'jpg',
     const query = QUERIES[(base + qi) % QUERIES.length];
     for (let page = 1; page <= 3 && !pick; page++) {
       let hits; try { hits = await search(query, page); } catch (e) { if (qi === 0 && page === 1) throw e; continue; }
-      const ok = hits.filter((x) => x.large && x.w >= 1280 && !BAD_TAGS.test(x.tags || '') && !EXCLUDE_TAGS.test(x.tags || '') && GOOD_TAGS.test(x.tags || ''));
+      const ok = hits.filter((x) => x.large && x.w >= 1280 && !BAD.test(x.tags || '') && !EXCLUDE_TAGS.test(x.tags || '') && (!GOOD_TAGS || GOOD_TAGS.test(x.tags || '')));
       if (!anyOk && ok.length) anyOk = ok[base % ok.length];
       const fresh = ok.filter((x) => !used[x.id]);
       if (fresh.length) pick = fresh[base % fresh.length];
