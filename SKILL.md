@@ -5,7 +5,7 @@ description: >-
   и эксплуатирует систему, которая САМА собирает семантику (включая реальный спрос из Яндекс.Вебмастера,
   не только текущие показы), генерирует экспертные статьи (1300-1500+ слов, гибкий порог) через
   aigate/Sonnet, очеловечивает, проверяет уникальность (content-watch/text.ru), генерирует картинки
-  (Pollinations.ai бесплатно → kie.ai резерв), публикует на сайт (Astro→FTP), шлёт на переобход в
+  (обложки: llm-proxy/Flux или реальные фото Pixabay), публикует на сайт (Astro→FTP), шлёт на переобход в
   Яндекс.Вебмастер + IndexNow, ведёт учёт расходов по всем платным API (cost-ledger) и присылает
   ежедневный отчёт (трафик/источники/страницы/позиции/расходы) в Telegram/MAX. Сайт адаптируется
   декларативно через `site.profile.mjs` (тип сайта, коллекции контента, голос бренда, CTA) — без
@@ -85,8 +85,13 @@ entry type found for *.mdx` и коллекция считается пусто�
    aigate.shop, см. «Правила и грабли»; title≤60, desc≤165, internalLinks≥3 **по urlBase из
    site.profile.mjs**, factbox, таблица, нет клише/плейсхолдеров) + **уникальность ≥82%**
    (content-watch основной провайдер → text.ru резерв) + LLM confidence ≥порога.
-5. **Картинки**: Pollinations.ai (бесплатно, без ключа) как основной провайдер → kie.ai Nano Banana 2
-   как молчаливый резерв при отказе (`lib/images.mjs`/`scripts/images/images.mjs`).
+5. **Картинки (обложки)**: по умолчанию `makeImage` идёт через llm-proxy (Flux/Imagen); при его отказе статья
+   выходит БЕЗ обложки — резерв Pollinations выключен (бесплатный режим отдаёт размытое с водяным знаком;
+   включается только `ALLOW_POLLINATIONS=1`). `IMAGE_PROVIDER=pixabay` — реальные фото зданий из Pixabay вместо
+   генерации (`scripts/images/pixabay.mjs`: на статью 1 поиск с кэшем 24 ч + 1 скачивание на свой сервер, без
+   массовых загрузок и хотлинка — так требует API). Сцена обложки берётся из `PROFILE.generation.coverScenes`
+   (иначе нейтральные); промпт всегда с «No text, no letters…» и БЕЗ слов «по теме статьи» (иначе Flux рисует
+   страницу статьи с портретом и буквами-кашей).
 6. **Публикация** (только live, `DRY_RUN=false`): запись MDX в `isTarget`-коллекцию → `npm run build`
    → FTP-деплой → Я.Вебмастер recrawl + IndexNow → обновление `llms.txt` → запись в used-queries.
 7. **Учёт расходов** (`lib/cost-ledger.mjs`): каждый платный вызов aigate (генерация/диалог — реальная
@@ -254,8 +259,9 @@ t.me/wa.me/vk.me/viber.com/max.ru и т.п., это не нативная кат
 | `seo-agent/prospect.mjs` | **Агентство**: CRM воронки потенциальных клиентов. CLI. |
 | `bot/bot.mjs` | Telegram-бот: диалог по проекту (через aigate) + резервный лид-эндпоинт. **Проверяет chat_id** — отвечает только владельцу (см. Безопасность). |
 | `bot/max.mjs` | Дублирующее уведомление о заявках в MAX (botapi.max.ru), опционально. |
-| `images/pollinations.mjs` | Основной провайдер картинок — Pollinations.ai, бесплатно, без ключа. |
-| `images/images.mjs` | Единый интерфейс: Pollinations → kie.ai (молчаливый резерв при отказе). |
+| `images/pollinations.mjs` | Резервный бесплатный провайдер (по умолчанию ВЫКЛ: размытое + водяной знак). |
+| `images/images.mjs` | Единый интерфейс: `IMAGE_PROVIDER=pixabay` → Pixabay; иначе llm-proxy (Flux/Imagen); Pollinations только при `ALLOW_POLLINATIONS=1`. |
+| `images/pixabay.mjs` | Обложки = реальные фото зданий из Pixabay: категория buildings, фильтр тегов, `used.json` без повторов. Настроен под жилые дома — для другой ниши поправьте QUERIES/теги. |
 | `images/kie-nb2.mjs`, `generate-set.mjs` | Резервный провайдер kie.ai Nano Banana 2 + сжатие sharp. |
 | `deploy-ftp.py` | Деплой `dist/` на FTP-хостинг (креды из `.env`). |
 
@@ -267,8 +273,13 @@ t.me/wa.me/vk.me/viber.com/max.ru и т.п., это не нативная кат
   Таймаут 120с на fetch — зависший внешний запрос иначе вешает весь прогон агента навсегда. **Каждый
   ответ содержит `usage.cost_usd`** — реальная цена вызова, используется `lib/cost-ledger.mjs` вместо
   оценки по токенам. Есть `GET /v1/balance` для остатка на счёте.
-- **Pollinations.ai** (картинки, основной, бесплатно, без ключа): `https://image.pollinations.ai/prompt/
-  {encoded}?width=&height=&model=flux&nologo=true&seed=`.
+- **Pixabay API** (обложки-фото, `IMAGE_PROVIDER=pixabay`): `GET https://pixabay.com/api/?key=&q=&image_type=photo&
+  category=buildings&orientation=horizontal&min_width=1280&safesearch=true&per_page=200` → `largeImageURL` (до 1280 px)
+  скачивать на СВОЙ сервер (хотлинк запрещён). Лимит 100 запросов/мин, ответы кэшировать 24 ч, массовые автоматические
+  загрузки запрещены. Лицензия — коммерческое использование без указания автора.
+- **Pollinations.ai** (резерв, по умолчанию ВЫКЛ — `ALLOW_POLLINATIONS=1`): `https://image.pollinations.ai/prompt/
+  {encoded}?width=&height=&model=flux&nologo=true&seed=`; в бесплатном режиме отдаёт размытое с водяным знаком и
+  быстро упирается в HTTP 402.
 - **kie.ai** (картинки NB2, резерв): `POST /api/v1/jobs/createTask` {model:"nano-banana-2",
   input:{prompt, aspect_ratio, resolution, output_format:"png"}} → poll `/api/v1/jobs/recordInfo?taskId=`.
 - **content-watch.ru** (уникальность, основной провайдер, дешевле text.ru): `POST

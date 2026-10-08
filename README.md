@@ -31,8 +31,8 @@ Telegram. Работает в двух режимах: **свои сайты** �
 **Публикация**
 - Astro → сборка → FTP/SSH на хостинг (по умолчанию), либо напрямую в **Joomla 4/5 через REST API** —
   цель выбирается в `site.profile.mjs`.
-- Картинки: Pollinations (бесплатно) → kie.ai Nano Banana 2 (резерв), с проходом через локальный
-  llm-proxy при его наличии; переиндексация через IndexNow + Яндекс.Вебмастер.
+- Обложки статей: через llm-proxy (Flux/Imagen) либо реальные фото зданий из Pixabay (`IMAGE_PROVIDER=pixabay`),
+  без платных генераторов; сцены под нишу — `generation.coverScenes`; переиндексация через IndexNow + Яндекс.Вебмастер.
 
 **GEO (оптимизация под ответы нейросетей)**
 - Citability-скоринг, `llms.txt`, GEO-директивы, E-E-A-T, свежесть.
@@ -66,7 +66,7 @@ scripts/seo-agent/
                               # keysso (keys.so), publish/publish-joomla, blocklist,
                               # quality-gate, client-audit/report, proposal, prospect, ...
   quality/                    # promptfoo quality-gate
-scripts/images/               # images (диспетчер), pollinations, kie-nb2, proxy-image
+scripts/images/               # images (диспетчер), pixabay, proxy-image, pollinations (резерв, выкл), kie-nb2
 scripts/bot/                  # telegram-бот согласований + site-state
 scripts/templates/            # robots.geo, политика/cookie/consent, lead.php (форвардер заявок)
 ```
@@ -90,5 +90,5 @@ scripts/templates/            # robots.geo, политика/cookie/consent, lea
 
 Стек: Node.js (ESM), Astro/Joomla-сайты, LLM через локальный llm-proxy + OpenAI-совместимые шлюзы
 (closerouter/anymodel/wellflow, перебор по кругу при сбое), Yandex Webmaster/Metrika,
-Wordstat/Arsenkin/XML/keys.so, Perplexity Sonar, Pollinations/kie.ai, Crawlee/Playwright, promptfoo,
+Wordstat/Arsenkin/XML/keys.so, Perplexity Sonar, Pixabay/Flux (llm-proxy), Crawlee/Playwright, promptfoo,
 ECharts, gotenberg, Umami, GrowthBook, Telegram Bot API.

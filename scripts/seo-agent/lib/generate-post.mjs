@@ -8,6 +8,21 @@ import { GEO_DIRECTIVES } from './geo-prompt.mjs';
 import { CONFIG } from '../config.mjs';
 import { PROFILE } from '../../../site.profile.mjs';
 
+// Промпт обложки. БЫЛО: «фотография по теме статьи» без темы → Flux рисовал «страницу статьи» (портрет автора + абракадабра-текст).
+// СТАЛО: сцена из набора сайта (PROFILE.generation.coverScenes) по хэшу slug — всегда фото без текста; английское «no text» Flux слушает лучше.
+const DEFAULT_COVER_SCENES = [
+  'светлое современное рабочее место с ноутбуком у окна, дневной свет',
+  'городская улица с современными зданиями, ясный день',
+  'уютный светлый офис, стол с ноутбуком и растением',
+  'панорама города на закате, тёплый свет',
+  'руки человека с блокнотом и ручкой на светлом столе, без надписей',
+];
+function coverPromptFor(slug) {
+  const scenes = (PROFILE.generation?.coverScenes?.length ? PROFILE.generation.coverScenes : DEFAULT_COVER_SCENES);
+  let h = 0; for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0;
+  return `Реалистичная профессиональная фотография: ${scenes[h % scenes.length]}, документальная фотография, высокое качество, естественный свет. No text, no letters, no words, no captions, no watermark, no logo.`;
+}
+
 // Все свои urlBase (MDX-коллекции + JSON-справочники) — чем считать ссылку "внутренней".
 // Раньше здесь было хардкодом /uslugi/|/blog/ (утечка из nalog-expert) — на сайтах с другими
 // urlBase (напр. novostroyki: /stati/, /novostroyki/, /zastroyshchiki/, /raiony/) фактчек всегда
@@ -132,7 +147,7 @@ ${links}
   if (!/^(image|cover):/m.test(_fm[1])) {
     try {
       const _t = (_fm[1].match(/^title:\s*"?(.+?)"?\s*$/m) || [])[1] || keyword;
-      const _img = await makeImage({ name: slug, prompt: `Реалистичная профессиональная фотография по теме статьи, чистый современный стиль, естественный свет, документальная фотография, высокое качество`, ratio: '16:9' });
+      const _img = await makeImage({ name: slug, prompt: coverPromptFor(slug), ratio: '16:9' });
       if (_img && _img.rel) mdx = mdx.replace(/^---\r?\n/, (m) => `${m}image: ${_img.rel}\ncover: ${_img.rel}\n`);
     } catch { /* публикуем без обложки — сборку не роняем */ }
   }
